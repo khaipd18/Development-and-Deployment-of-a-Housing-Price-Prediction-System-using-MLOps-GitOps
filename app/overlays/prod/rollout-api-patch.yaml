@@ -1,0 +1,16 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: housing-api
+spec:
+  strategy:
+    canary:
+      steps:
+        # Bước 1: Cho 20% lượng người dùng truy cập vào bản mới
+        - setWeight: 20
+        # Bước 2: Tạm dừng 10 phút để theo dõi lỗi (500 Server Error)
+        - pause: { duration: 10m }
+        # Bước 3: Nâng lên 50% traffic
+        - setWeight: 50
+        # Bước 4: Chờ người quản trị vào ArgoCD bấm nút Promote để lên 100%
+        - pause: {}

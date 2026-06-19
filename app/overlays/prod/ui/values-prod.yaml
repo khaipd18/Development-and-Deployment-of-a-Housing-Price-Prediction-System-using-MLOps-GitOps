@@ -1,0 +1,12 @@
+replicaCount: 3
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi  
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+env:
+  STREAMLIT_SERVER_GATHER_USAGE_STATS: "false"
