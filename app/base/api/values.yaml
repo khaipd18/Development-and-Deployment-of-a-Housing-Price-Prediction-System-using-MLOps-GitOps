@@ -15,7 +15,7 @@ podSecurityContext:
 image:
   repository: "housing-api" 
   tag: "latest"
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 securityContext:
   allowPrivilegeEscalation: false
