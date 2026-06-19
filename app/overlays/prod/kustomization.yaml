@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+helmGlobals:
+  chartHome: ../../../
+
+helmCharts:
+  - name: helm-charts
+    releaseName: housing-api
+    additionalValuesFiles:
+      - api/values-prod.yaml
+
+  - name: helm-charts
+    releaseName: housing-ui
+    additionalValuesFiles:
+      - ui/values-prod.yaml
+
+patches:
+  - path: rollout-api-patch.yaml
+    target:
+      group: apps
+      kind: Deployment
+      name: housing-api
+      
+  - path: rollout-ui-patch.yaml
+    target:
+      group: apps
+      kind: Deployment
+      name: housing-ui

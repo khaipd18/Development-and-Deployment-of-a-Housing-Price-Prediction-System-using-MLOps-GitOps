@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: housing-ui
+spec:
+  strategy:
+    canary:
+      steps:
+        # Chuyển 50% người dùng sang UI mới ngay lập tức
+        - setWeight: 50
+        # Đợi 5 phút để đảm bảo không vỡ layout/lỗi javascript
+        - pause: { duration: 5m }
+        # Tự động đẩy lên 100%
+        - setWeight: 100
