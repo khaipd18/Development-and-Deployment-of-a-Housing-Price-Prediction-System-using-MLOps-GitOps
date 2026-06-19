@@ -1,0 +1,6 @@
+apiVersion: v2
+name: standard-microservice
+description: A generic Helm chart for deploying standard a web-based mlops-housing project.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
