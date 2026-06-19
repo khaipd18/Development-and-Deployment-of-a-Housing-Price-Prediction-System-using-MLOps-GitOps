@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app-of-apps
+  namespace: argocd
+  finalizers:
+    # Đảm bảo khi bạn xóa Root App này, tất cả các App con cũng được dọn dẹp sạch sẽ
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  
+  # 1. NGUỒN CẤP DỮ LIỆU (Chỉ đường cho Argo CD)
+  source:
+    repoURL: 'https://github.com/your-username/my-gitops-repo.git' # Bắt buộc thay bằng link repo của bạn
+    targetRevision: HEAD # Luôn lấy code mới nhất từ nhánh chính
+    path: argocd # Trỏ vào thư mục cha chứa tất cả cấu hình Argo CD
+    directory:
+      recurse: true # 💡 PHÉP THUẬT Ở ĐÂY: Dặn Argo CD quét sâu vào các thư mục con (infrastructure, applications)
+      exclude: "root/*" # Bỏ qua thư mục root để tránh việc Argo CD tự quét lại chính file này gây vòng lặp
+      
+  # 2. ĐÍCH ĐẾN (Triển khai vào đâu)
+  destination:
+    server: 'https://kubernetes.default.svc' # Triển khai ngay trên cụm EKS hiện tại
+    namespace: argocd # Các file Application con bắt buộc phải nằm trong namespace của Argo CD
+    
+  # 3. CHÍNH SÁCH ĐỒNG BỘ
+  syncPolicy:
+    automated:
+      prune: true     # Nếu bạn xóa 1 file app con trên Git, Argo CD sẽ tự xóa app đó trên Cluster
+      selfHeal: true  # Nếu ai đó sửa tay file trên Cluster, Argo CD sẽ tự động đè lại cấu hình từ Git
+    syncOptions:
+      - CreateNamespace=true
