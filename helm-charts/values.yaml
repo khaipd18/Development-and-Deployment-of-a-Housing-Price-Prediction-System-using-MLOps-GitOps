@@ -1,0 +1,31 @@
+deployment: 
+  enabled: true
+
+replicaCount: 1
+
+serviceAccount:
+  create: false
+  name: ""
+
+image:
+  repository: ""
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  enabled: false
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+env: {}
+
+resources: {}
+
+probes: {}
+
+volumes: []
+volumeMounts: []
+
+podSecurityContext: {}
+securityContext: {}
