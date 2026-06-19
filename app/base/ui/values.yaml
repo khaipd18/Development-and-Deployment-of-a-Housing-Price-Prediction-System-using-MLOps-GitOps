@@ -1,0 +1,60 @@
+deployment: 
+  enabled: true
+
+replicaCount: 2 
+
+serviceAccount:
+  create: true
+  name: "housing-ui"
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+image:
+  repository: "housing-ui" 
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false 
+
+service:
+  enabled: true
+  type: ClusterIP 
+  port: 8501
+  targetPort: 8501
+
+env:
+  STREAMLIT_SERVER_PORT: "8501"
+  STREAMLIT_SERVER_ADDRESS: "0.0.0.0"
+  STREAMLIT_SERVER_HEADLESS: "true"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi 
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+probes:
+  readiness:
+    httpGet:
+      path: /_stcore/health
+      port: 8501
+    initialDelaySeconds: 15 
+    periodSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+  
+  liveness:
+    httpGet:
+      path: /_stcore/health
+      port: 8501
+    initialDelaySeconds: 20
+    periodSeconds: 20
+    successThreshold: 1
+    failureThreshold: 3

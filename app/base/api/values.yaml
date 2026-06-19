@@ -1,0 +1,58 @@
+deployment: 
+  enabled: true
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  name: "housing-api"
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+image:
+  repository: "housing-api" 
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8000
+  targetPort: 8000
+
+env:
+  PORT: "8000"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+probes:
+  readiness:
+    httpGet:
+      path: /docs
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+  
+  liveness:
+    httpGet:
+      path: /docs
+      port: 8000
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    successThreshold: 1
+    failureThreshold: 3
