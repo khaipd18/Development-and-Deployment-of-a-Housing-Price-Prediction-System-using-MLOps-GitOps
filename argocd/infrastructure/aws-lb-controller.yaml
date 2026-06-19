@@ -14,16 +14,15 @@ spec:
     helm:
       parameters:
         - name: clusterName
-          value: "TEN_CUM_EKS_CUA_BAN" 
+          value: "housing-mlops-eks-cluster" 
         
         - name: serviceAccount.create
           value: "true"
         - name: serviceAccount.name
           value: "aws-load-balancer-controller"
           
-        # (Tùy chọn) Bỏ comment 2 dòng dưới nếu bạn thiết lập IAM Role bằng IRSA qua Helm thay vì aws-iam-authenticator
-        # - name: serviceAccount.annotations.eks\.amazonaws\.com/role-arn
-        #   value: "arn:aws:iam::ACCOUNT_ID:role/AmazonEKSLoadBalancerControllerRole"
+        - name: serviceAccount.annotations.eks\.amazonaws\.com/role-arn
+          value: "arn:aws:iam::770353436964:role/housing-mlops-aws-lb-controller-role"
           
   destination:
     server: 'https://kubernetes.default.svc'
