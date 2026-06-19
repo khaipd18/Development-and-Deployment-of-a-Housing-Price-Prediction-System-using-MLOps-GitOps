@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: housing-applications
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: 'https://github.com/khaipd18/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps-GitOps.git'
+        revision: HEAD
+        directories:
+          - path: app/overlays/*
+  
+  template:
+    metadata:
+      # Biến {{path.basename}} sẽ tự động thay thành 'dev' hoặc 'prod'
+      name: 'housing-{{path.basename}}'
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: 'https://github.com/khaipd18/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps-GitOps.git'
+        targetRevision: HEAD
+        path: '{{path}}' # Tự động điền 'app/overlays/dev' hoặc 'app/overlays/prod'
+      destination:
+        server: 'https://kubernetes.default.svc'
+        # Tự động tạo và deploy vào namespace housing-dev hoặc housing-prod
+        namespace: 'housing-{{path.basename}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
