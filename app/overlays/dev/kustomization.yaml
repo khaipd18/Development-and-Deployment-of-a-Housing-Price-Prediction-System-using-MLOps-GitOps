@@ -10,10 +10,12 @@ helmGlobals:
 helmCharts:
   - name: helm-charts
     releaseName: housing-api
+    valuesFile: ../../base/api/values.yaml
     additionalValuesFiles:
       - api/values-dev.yaml
 
   - name: helm-charts
     releaseName: housing-ui
+    valuesFile: ../../base/ui/values.yaml
     additionalValuesFiles:
       - ui/values-dev.yaml
