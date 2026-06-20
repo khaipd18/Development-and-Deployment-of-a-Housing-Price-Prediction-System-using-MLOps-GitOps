@@ -1,12 +1,12 @@
 replicaCount: 1
-
 resources:
   limits:
-    cpu: 250m     
-    memory: 512Mi 
+    cpu: 250m
+    memory: 512Mi
   requests:
     cpu: 100m
     memory: 256Mi
-
 env:
   STREAMLIT_SERVER_GATHER_USAGE_STATS: "false"
+image:
+  tag: 66f259cb4b8efb5db9d1651d12f3501e55461ca4
