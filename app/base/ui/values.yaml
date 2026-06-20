@@ -13,7 +13,7 @@ podSecurityContext:
   fsGroup: 1000
 
 image:
-  repository: "arn:aws:ecr:ap-southeast-1:770353436964:repository/housing-ui" 
+  repository: "770353436964.dkr.ecr.ap-southeast-1.amazonaws.com/housing-ui" 
   tag: "latest"
   pullPolicy: Always
 
