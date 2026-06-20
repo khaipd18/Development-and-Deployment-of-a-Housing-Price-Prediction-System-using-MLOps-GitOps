@@ -3,17 +3,3 @@ kind: Kustomization
 
 resources:
   - ingress.yaml
-
-helmGlobals:
-  chartHome: ../../ 
-
-helmCharts:
-  # -- Render API --
-  - name: helm-charts 
-    releaseName: housing-api
-    valuesFile: api/values.yaml
-
-  # -- Render UI --
-  - name: helm-charts
-    releaseName: housing-ui
-    valuesFile: ui/values.yaml
