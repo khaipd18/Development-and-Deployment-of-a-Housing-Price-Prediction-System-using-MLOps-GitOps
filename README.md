@@ -2,6 +2,9 @@
 
 Dự án xây dựng hệ thống dự đoán giá nhà, triển khai tự động lên AWS EKS thông qua Argo CD theo mô hình MLOps + GitOps.
 
+> **Lưu ý:** Đây là repo GitOps — chỉ chứa cấu hình Kubernetes và Argo CD. Code nguồn, pipeline huấn luyện model, và hạ tầng Terraform nằm ở repo chính:
+> [Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps](https://github.com/LeChanhAn/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps)
+
 ---
 
 ## 1. Cấu hình Cluster và cài đặt Argo CD
@@ -76,8 +79,65 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ### Bước 1.5 — Khởi tạo Applications
 
-Apply cấu hình root để Argo CD tự quét và triển khai toàn bộ hệ thống (Controller, Load Balancer, API, UI):
+Apply cấu hình root để Argo CD tự quét và triển khai toàn bộ hệ thống (AWS Load Balancer Controller, Argo Rollouts, API, UI):
 
 ```bash
 kubectl apply -k argocd/root/
 ```
+
+> **Quan trọng:** Bước trên có thay đổi `argocd-cm` để bật Helm build cho Kustomize. Cần restart Argo CD Repo Server để cấu hình có hiệu lực:
+> ```bash
+> kubectl rollout restart deployment argocd-repo-server -n argocd
+> ```
+
+---
+
+## 2. Canary Deployment với Argo Rollouts (môi trường Prod)
+
+Môi trường `housing-prod` dùng Argo Rollouts để triển khai theo kiểu canary — đẩy traffic dần dần sang version mới thay vì chuyển hẳn một lần. Cần cài plugin `kubectl` để thao tác được.
+
+### Bước 2.1 — Cài plugin (Linux / WSL)
+
+```bash
+# Tải binary
+curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+
+# Cấp quyền thực thi
+chmod +x ./kubectl-argo-rollouts-linux-amd64
+
+# Chuyển vào PATH
+sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+# Kiểm tra
+kubectl argo rollouts version
+```
+
+---
+
+### Bước 2.2 — Theo dõi và promote rollout
+
+Khi có image mới được push lên nhánh `main`, Argo CD sẽ tự triển khai nhưng sẽ dừng lại (Pause) ở từng bước canary theo kịch bản đã cấu hình sẵn.
+
+Xem trạng thái traffic đang chuyển như thế nào:
+
+```bash
+kubectl argo rollouts get rollout housing-api -n housing-prod --watch
+```
+
+Phê duyệt để tăng % traffic lên bước tiếp theo (hoặc lên 100%):
+
+```bash
+kubectl argo rollouts promote housing-api -n housing-prod
+```
+
+---
+
+### Bước 2.3 — Mở Rollouts Dashboard
+
+Nếu không muốn dùng CLI, có thể bật dashboard để promote bằng nút bấm:
+
+```bash
+kubectl argo rollouts dashboard -n housing-prod
+```
+
+Giữ terminal chạy, mở trình duyệt vào: **http://localhost:3100**
