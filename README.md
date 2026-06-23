@@ -3,72 +3,94 @@
 Dự án xây dựng hệ thống dự đoán giá nhà, triển khai tự động lên AWS EKS thông qua Argo CD theo mô hình MLOps + GitOps.
 
 > **Lưu ý:** Đây là repo GitOps — chỉ chứa cấu hình Kubernetes và Argo CD. Code nguồn, pipeline huấn luyện model, và hạ tầng Terraform nằm ở repo chính:
-> [Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps](https://github.com/LeChanhAn/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps)
+> 🔗 [Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps](https://github.com/LeChanhAn/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps)
 
 ---
 
-## 1. Cấu hình Cluster và cài đặt Argo CD
+## 🌟 1. Điểm nổi bật về kỹ thuật
 
-Sau khi Terraform đã tạo xong hạ tầng, làm theo các bước dưới đây để kết nối với cluster và cài Argo CD.
+### 1.1. App of Apps & ApplicationSet
 
-### Bước 1.1 — Cập nhật kubeconfig
+Thay vì tạo thủ công từng ứng dụng trên Argo CD, dự án dùng mẫu **App of Apps** — chỉ cần apply một thư mục gốc (`argocd/root`), hệ thống tự khởi tạo toàn bộ các thành phần còn lại. **ApplicationSet** được dùng thêm để tự động phát hiện và sinh ra môi trường Dev/Prod dựa trên cấu trúc thư mục.
 
-Chạy lệnh này để `kubectl` có thể nói chuyện với EKS cluster:
+### 1.2. Kustomize kết hợp Helm
+
+Dự án tự xây một **Local Helm Chart** (`standard-microservice`) chứa các template chuẩn cho microservice. Thay vì `helm install` truyền thống, tính năng **`helmCharts` của Kustomize** được dùng để inject values linh hoạt cho từng môi trường (Base → Dev/Prod) — giữ được sức mạnh template của Helm lẫn khả năng overlay của Kustomize.
+
+### 1.3. Canary Deployment với Argo Rollouts (Prod)
+
+Môi trường Production không dùng `Deployment` tiêu chuẩn mà chuyển sang `Rollout`. Khi có version mới, traffic được chuyển dần theo các bước: **20% → chờ 10 phút kiểm tra lỗi → 50% → chờ duyệt thủ công → 100%**.
+
+---
+
+## 📂 2. Cấu trúc thư mục
+
+```text
+📦 GitOps-Repository
+ ┣ 📂 app                      # Cấu hình triển khai API & UI
+ ┃ ┣ 📂 base                   # Cấu hình gốc dùng chung cho mọi môi trường
+ ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress
+ ┃ ┃ ┣ 📂 api & 📂 ui          # values.yaml cơ sở cho Helm chart
+ ┃ ┗ 📂 overlays               # Cấu hình ghi đè theo môi trường
+ ┃   ┣ 📂 dev                  # Dev: 1 replica, resource thấp
+ ┃   ┗ 📂 prod                 # Prod: 3 replicas + kịch bản Canary
+ ┣ 📂 argocd
+ ┃ ┣ 📂 applications           # ApplicationSet tự tạo app từ thư mục overlays
+ ┃ ┣ 📂 infrastructure         # AWS LB Controller, Argo Rollouts
+ ┃ ┗ 📂 root                   # App of Apps — điểm khởi động toàn hệ thống
+ ┣ 📂 helm-charts
+ ┃ ┗ 📂 standard-microservice  # Template chuẩn: Deployment, Service,...
+ ┗ 📜 README.md
+```
+
+---
+
+## 🚀 3. Hướng dẫn bootstrap hệ thống
+
+Sau khi Terraform tạo xong hạ tầng và cụm EKS, làm theo các bước dưới đây.
+
+### Bước 3.1 — Kết nối với EKS Cluster
 
 ```bash
 aws eks update-kubeconfig --region ap-southeast-1 --name housing-mlops-eks-cluster
 ```
 
-Kiểm tra context hiện tại:
+Kiểm tra và chuyển context nếu cần:
 
 ```bash
 kubectl config get-contexts
-```
-
-Nếu đang có nhiều cluster, chuyển sang đúng context của dự án (thay `<tên-context>` bằng ARN cluster vừa xuất hiện ở trên, ví dụ `arn:aws:eks:ap-southeast-1:770353436964:cluster/housing-mlops-eks-cluster`):
-
-```bash
 kubectl config use-context <tên-context>
 ```
 
 ---
 
-### Bước 1.2 — Cài Argo CD
-
-Tạo namespace và cài từ manifest chính thức:
+### Bước 3.2 — Cài Argo CD
 
 ```bash
-# Tạo namespace
 kubectl create namespace argocd
 
-# Cài đặt
 kubectl apply -n argocd --server-side --force-conflicts -f \
   https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-> Quá trình này tạo các CRD và khởi động pods của Argo CD. Chờ đến khi tất cả pods chuyển sang `Running`:
-> ```bash
-> kubectl get pods -n argocd
-> ```
+Chờ đến khi tất cả pods chuyển sang `Running`:
+
+```bash
+kubectl get pods -n argocd
+```
 
 ---
 
-### Bước 1.3 — Mở Argo CD UI
-
-Argo CD không expose ra ngoài theo mặc định. Dùng port-forward để truy cập trên máy local:
+### Bước 3.3 — Truy cập Argo CD UI
 
 ```bash
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 ```
 
-Giữ terminal này chạy, rồi mở trình duyệt vào: **https://localhost:8080**
-
----
-
-### Bước 1.4 — Đăng nhập
+Giữ terminal chạy, mở trình duyệt vào: **https://localhost:8080**
 
 - **Username:** `admin`
-- **Password:** Lấy từ Kubernetes Secret bằng lệnh sau (chạy ở terminal khác):
+- **Password:** Chạy lệnh này ở terminal khác:
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret \
@@ -77,54 +99,41 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ---
 
-### Bước 1.5 — Khởi tạo Applications
-
-Apply cấu hình root để Argo CD tự quét và triển khai toàn bộ hệ thống (AWS Load Balancer Controller, Argo Rollouts, API, UI):
+### Bước 3.4 — Khởi động App of Apps
 
 ```bash
 kubectl apply -k argocd/root/
 ```
 
-> **Quan trọng:** Bước trên có thay đổi `argocd-cm` để bật Helm build cho Kustomize. Cần restart Argo CD Repo Server để cấu hình có hiệu lực:
+> **Quan trọng:** Cấu hình root bật `--enable-helm` cho Kustomize. Cần restart Repo Server để Argo CD nhận cấu hình mới:
 > ```bash
 > kubectl rollout restart deployment argocd-repo-server -n argocd
 > ```
 
 ---
 
-## 2. Canary Deployment với Argo Rollouts (môi trường Prod)
+## 🦅 4. Vận hành Canary Deployment (môi trường Prod)
 
-Môi trường `housing-prod` dùng Argo Rollouts để triển khai theo kiểu canary — đẩy traffic dần dần sang version mới thay vì chuyển hẳn một lần. Cần cài plugin `kubectl` để thao tác được.
-
-### Bước 2.1 — Cài plugin (Linux / WSL)
+### Bước 4.1 — Cài plugin Argo Rollouts (Linux / WSL)
 
 ```bash
-# Tải binary
 curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
-
-# Cấp quyền thực thi
 chmod +x ./kubectl-argo-rollouts-linux-amd64
-
-# Chuyển vào PATH
 sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
-
-# Kiểm tra
 kubectl argo rollouts version
 ```
 
 ---
 
-### Bước 2.2 — Theo dõi và promote rollout
+### Bước 4.2 — Theo dõi và promote rollout
 
-Khi có image mới được push lên nhánh `main`, Argo CD sẽ tự triển khai nhưng sẽ dừng lại (Pause) ở từng bước canary theo kịch bản đã cấu hình sẵn.
-
-Xem trạng thái traffic đang chuyển như thế nào:
+Khi có image mới push lên nhánh `main`, Argo CD tự triển khai nhưng dừng ở mức 20% traffic. Xem trạng thái theo thời gian thực:
 
 ```bash
 kubectl argo rollouts get rollout housing-api -n housing-prod --watch
 ```
 
-Phê duyệt để tăng % traffic lên bước tiếp theo (hoặc lên 100%):
+Sau khi xác nhận version mới ổn định, promote lên bước tiếp theo:
 
 ```bash
 kubectl argo rollouts promote housing-api -n housing-prod
@@ -132,9 +141,7 @@ kubectl argo rollouts promote housing-api -n housing-prod
 
 ---
 
-### Bước 2.3 — Mở Rollouts Dashboard
-
-Nếu không muốn dùng CLI, có thể bật dashboard để promote bằng nút bấm:
+### Bước 4.3 — Mở Rollouts Dashboard (tùy chọn)
 
 ```bash
 kubectl argo rollouts dashboard -n housing-prod
