@@ -7,4 +7,4 @@ resources:
     cpu: 100m
     memory: 128Mi
 image:
-  tag: 9ce940a56fa7335a3d56919d8149ccfc7c5590bd
+  tag: 387783cfc9c802f88091482bfd6804ebd2fa229d
