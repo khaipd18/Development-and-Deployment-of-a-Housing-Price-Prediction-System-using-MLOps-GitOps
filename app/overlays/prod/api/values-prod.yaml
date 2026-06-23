@@ -1,3 +1,6 @@
+deployment:
+  apiVersion: argoproj.io/v1alpha1
+  kind: Rollout
 replicaCount: 3
 resources:
   limits:

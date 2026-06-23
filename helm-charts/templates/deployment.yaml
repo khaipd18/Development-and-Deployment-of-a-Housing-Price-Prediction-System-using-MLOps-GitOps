@@ -1,6 +1,6 @@
 {{- if .Values.deployment.enabled }}
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: {{ .Values.deployment.apiVersion | default "apps/v1" }}
+kind: {{ .Values.deployment.kind | default "Deployment" }}
 metadata:
   name: {{ .Release.Name }}
   labels:

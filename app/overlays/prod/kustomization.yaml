@@ -23,12 +23,12 @@ helmCharts:
 patches:
   - path: rollout-api-patch.yaml
     target:
-      group: apps
-      kind: Deployment
+      group: argoproj.io     
+      kind: Rollout          
       name: housing-api
       
   - path: rollout-ui-patch.yaml
     target:
-      group: apps
-      kind: Deployment
+      group: argoproj.io     
+      kind: Rollout         
       name: housing-ui
