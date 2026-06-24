@@ -1,70 +1,71 @@
+*Read this in other languages: [Tiếng Việt](README-vi.md)*
 # Development and Deployment of a Housing Price Prediction System using MLOps & GitOps
 
-Dự án xây dựng hệ thống dự đoán giá nhà, triển khai tự động lên AWS EKS thông qua Argo CD theo mô hình MLOps + GitOps.
+A housing price prediction system deployed automatically to AWS EKS via Argo CD, following MLOps and GitOps principles.
 
-> **Lưu ý:** Đây là repo GitOps — chỉ chứa cấu hình Kubernetes và Argo CD. Code nguồn, pipeline huấn luyện model, và hạ tầng Terraform nằm ở repo chính:
+> **Note:** This is the GitOps repository — it only contains Kubernetes and Argo CD configuration. Source code, model training pipelines, and Terraform infrastructure live in the main repo:
 > 🔗 [Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps](https://github.com/LeChanhAn/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps)
 
 ---
 
-## 🌟 1. Điểm nổi bật về kỹ thuật
+## 🌟 1. Technical Highlights
 
 ### 1.1. App of Apps & ApplicationSet
 
-Thay vì tạo thủ công từng ứng dụng trên Argo CD, dự án dùng mẫu **App of Apps** — chỉ cần apply một thư mục gốc (`argocd/root`), hệ thống tự khởi tạo toàn bộ các thành phần còn lại. **ApplicationSet** được dùng thêm để tự động phát hiện và sinh ra môi trường Dev/Prod dựa trên cấu trúc thư mục.
+Instead of manually creating each application in Argo CD, the project uses the **App of Apps** pattern — applying a single root directory (`argocd/root`) is enough to bootstrap the entire system. **ApplicationSet** is also used to automatically discover and generate Dev/Prod environments based on the directory structure.
 
-### 1.2. Kustomize kết hợp Helm
+### 1.2. Kustomize + Helm (Hybrid Approach)
 
-Dự án tự xây một **Local Helm Chart** (`standard-microservice`) chứa các template chuẩn cho microservice. Thay vì `helm install` truyền thống, tính năng **`helmCharts` của Kustomize** được dùng để inject values linh hoạt cho từng môi trường (Base → Dev/Prod) — giữ được sức mạnh template của Helm lẫn khả năng overlay của Kustomize.
+The project ships a custom **Local Helm Chart** (`standard-microservice`) with standardized templates for microservices. Rather than using `helm install`, Kustomize's **`helmCharts`** feature injects environment-specific values (Base → Dev/Prod) — combining Helm's templating power with Kustomize's overlay flexibility.
 
-### 1.3. Canary Deployment với Argo Rollouts (Prod)
+### 1.3. Canary Deployment with Argo Rollouts (Prod)
 
-Môi trường Production không dùng `Deployment` tiêu chuẩn mà chuyển sang `Rollout`. Khi có version mới, traffic được chuyển dần theo các bước: **20% → chờ 10 phút kiểm tra lỗi → 50% → chờ duyệt thủ công → 100%**.
+The Production environment uses `Rollout` instead of a standard Kubernetes `Deployment`. When a new version is released, traffic shifts gradually: **20% → wait 10 min for error check → 50% → manual approval → 100%**.
 
 ---
 
-## 📂 2. Cấu trúc thư mục
+## 📂 2. Repository Structure
 
 ```text
 📦 GitOps-Repository
- ┣ 📂 app                      # Cấu hình triển khai API & UI
- ┃ ┣ 📂 base                   # Cấu hình gốc dùng chung cho mọi môi trường
+ ┣ 📂 app                      # Deployment config for API & UI
+ ┃ ┣ 📂 base                   # Shared base config for all environments
  ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress
- ┃ ┃ ┣ 📂 api & 📂 ui          # values.yaml cơ sở cho Helm chart
- ┃ ┗ 📂 overlays               # Cấu hình ghi đè theo môi trường
- ┃   ┣ 📂 dev                  # Dev: 1 replica, resource thấp
- ┃   ┗ 📂 prod                 # Prod: 3 replicas + kịch bản Canary
+ ┃ ┃ ┣ 📂 api & 📂 ui          # Base values.yaml for Helm chart
+ ┃ ┗ 📂 overlays               # Environment-specific overrides
+ ┃   ┣ 📂 dev                  # Dev: 1 replica, low resource limits
+ ┃   ┗ 📂 prod                 # Prod: 3 replicas + Canary strategy
  ┣ 📂 argocd
- ┃ ┣ 📂 applications           # ApplicationSet tự tạo app từ thư mục overlays
+ ┃ ┣ 📂 applications           # ApplicationSet — auto-generates apps from overlays
  ┃ ┣ 📂 infrastructure         # AWS LB Controller, Argo Rollouts
- ┃ ┗ 📂 root                   # App of Apps — điểm khởi động toàn hệ thống
+ ┃ ┗ 📂 root                   # App of Apps — system bootstrap entry point
  ┣ 📂 helm-charts
- ┃ ┗ 📂 standard-microservice  # Template chuẩn: Deployment, Service,...
+ ┃ ┗ 📂 standard-microservice  # Shared template: Deployment, Service, Ingress, HPA...
  ┗ 📜 README.md
 ```
 
 ---
 
-## 🚀 3. Hướng dẫn bootstrap hệ thống
+## 🚀 3. Bootstrapping the System
 
-Sau khi Terraform tạo xong hạ tầng và cụm EKS, làm theo các bước dưới đây.
+Once Terraform has provisioned the infrastructure and EKS cluster, follow the steps below.
 
-### Bước 3.1 — Kết nối với EKS Cluster
+### Step 3.1 — Connect to the EKS Cluster
 
 ```bash
 aws eks update-kubeconfig --region ap-southeast-1 --name housing-mlops-eks-cluster
 ```
 
-Kiểm tra và chuyển context nếu cần:
+Check and switch context if needed:
 
 ```bash
 kubectl config get-contexts
-kubectl config use-context <tên-context>
+kubectl config use-context <context-name>
 ```
 
 ---
 
-### Bước 3.2 — Cài Argo CD
+### Step 3.2 — Install Argo CD
 
 ```bash
 kubectl create namespace argocd
@@ -73,7 +74,7 @@ kubectl apply -n argocd --server-side --force-conflicts -f \
   https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-Chờ đến khi tất cả pods chuyển sang `Running`:
+Wait until all pods are `Running`:
 
 ```bash
 kubectl get pods -n argocd
@@ -81,16 +82,16 @@ kubectl get pods -n argocd
 
 ---
 
-### Bước 3.3 — Truy cập Argo CD UI
+### Step 3.3 — Access the Argo CD UI
 
 ```bash
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 ```
 
-Giữ terminal chạy, mở trình duyệt vào: **https://localhost:8080**
+Keep the terminal running and open: **https://localhost:8080**
 
 - **Username:** `admin`
-- **Password:** Chạy lệnh này ở terminal khác:
+- **Password:** Run this in another terminal:
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret \
@@ -99,22 +100,36 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ---
 
-### Bước 3.4 — Khởi động App of Apps
+### Step 3.4 — Trigger the App of Apps
 
 ```bash
 kubectl apply -k argocd/root/
 ```
 
-> **Quan trọng:** Cấu hình root bật `--enable-helm` cho Kustomize. Cần restart Repo Server để Argo CD nhận cấu hình mới:
+> **Important:** The root config enables `--enable-helm` for Kustomize. Restart the Repo Server so Argo CD picks up the new configuration:
 > ```bash
 > kubectl rollout restart deployment argocd-repo-server -n argocd
 > ```
 
 ---
 
-## 🦅 4. Vận hành Canary Deployment (môi trường Prod)
+### Step 3.5 — Get the Application URL (Ingress)
 
-### Bước 4.1 — Cài plugin Argo Rollouts (Linux / WSL)
+The system provisions a separate ALB for each environment. Run the commands below and copy the value from the `ADDRESS` column:
+
+```bash
+# Dev
+kubectl get ingress housing-ingress -n housing-dev
+
+# Prod
+kubectl get ingress housing-ingress -n housing-prod
+```
+
+---
+
+## 🦅 4. Operating Canary Deployments (Prod)
+
+### Step 4.1 — Install the Argo Rollouts Plugin (Linux / WSL)
 
 ```bash
 curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
@@ -125,15 +140,15 @@ kubectl argo rollouts version
 
 ---
 
-### Bước 4.2 — Theo dõi và promote rollout
+### Step 4.2 — Monitor and Promote
 
-Khi có image mới push lên nhánh `main`, Argo CD tự triển khai nhưng dừng ở mức 20% traffic. Xem trạng thái theo thời gian thực:
+When a new image is pushed to `main`, Argo CD deploys it automatically but pauses at 20% traffic. Watch the rollout in real time:
 
 ```bash
 kubectl argo rollouts get rollout housing-api -n housing-prod --watch
 ```
 
-Sau khi xác nhận version mới ổn định, promote lên bước tiếp theo:
+Once the new version looks stable, promote to the next step:
 
 ```bash
 kubectl argo rollouts promote housing-api -n housing-prod
@@ -141,10 +156,39 @@ kubectl argo rollouts promote housing-api -n housing-prod
 
 ---
 
-### Bước 4.3 — Mở Rollouts Dashboard (tùy chọn)
+### Step 4.3 — Rollouts Dashboard (Optional)
 
 ```bash
 kubectl argo rollouts dashboard -n housing-prod
 ```
 
-Giữ terminal chạy, mở trình duyệt vào: **http://localhost:3100**
+Keep the terminal running and open: **http://localhost:3100**
+
+---
+
+## 🧹 5. Teardown
+
+> **Read this before running `terraform destroy`**
+
+The ALBs in this project are not managed by Terraform — they are created automatically by the AWS Load Balancer Controller when Kubernetes applies `ingress.yaml`. This means Terraform has no knowledge of them and will not delete them on its own.
+
+If you run `terraform destroy` immediately, these ALBs will still hold ENIs inside the Subnet, causing VPC deletion to fail.
+
+**Correct teardown order:**
+
+**1. Delete the Ingress resources so Kubernetes reclaims the ALBs:**
+
+```bash
+kubectl delete ingress housing-ingress -n housing-dev
+kubectl delete ingress housing-ingress -n housing-prod
+```
+
+**2. Wait for the ALBs to be fully removed:**
+
+Go to AWS Console → EC2 → Load Balancers and wait 2–3 minutes until they disappear.
+
+**3. Run terraform destroy:**
+
+```bash
+terraform destroy
+```
