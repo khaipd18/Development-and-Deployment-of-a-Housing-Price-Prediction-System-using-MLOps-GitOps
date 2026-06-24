@@ -166,26 +166,29 @@ Giữ terminal chạy, mở trình duyệt vào: **http://localhost:3100**
 
 ---
 
-## 🧹 5. Teardown — Dọn dẹp hệ thống
+## 🧹 5. Hướng dẫn gỡ bỏ hệ thống (Teardown)
 
-> **Đọc trước khi chạy `terraform destroy`**
+Khi muốn dọn dẹp hệ thống để tiết kiệm chi phí, **bạn bắt buộc phải xóa toàn bộ tài nguyên ứng dụng trên Kubernetes (đặc biệt là Ingress) trước khi chạy `terraform destroy` bên repo hạ tầng.**
 
-Các ALB trong dự án không do Terraform tạo ra — chúng được AWS Load Balancer Controller tạo tự động khi Kubernetes apply `ingress.yaml`. Vì vậy Terraform không quản lý và cũng không tự xóa chúng.
+**Tại sao phải làm vậy?**
 
-Nếu chạy `terraform destroy` ngay, các ALB này sẽ còn giữ ENI trong Subnet, khiến việc xóa VPC bị lỗi.
+> Các ALB trong dự án được tạo tự động bởi **AWS Load Balancer Controller** bên trong EKS, không phải do Terraform quản lý. Nếu chạy `terraform destroy` ngay, Terraform sẽ không xóa được VPC vì các ALB này vẫn đang giữ Network Interface (ENI) trong Subnet.
+>
+> **Lưu ý:** Không dùng `kubectl delete ingress` thủ công — Argo CD đang bật `selfHeal` và sẽ lập tức tạo lại ALB ngay khi bạn vừa xóa. Cách duy nhất là xóa toàn bộ Application.
 
-**Thứ tự xóa đúng:**
+**Quy trình dọn dẹp chuẩn (Cascade Delete):**
 
-**1. Xóa Ingress để K8s tự thu hồi ALB:**
+**1. Gỡ bỏ toàn bộ ứng dụng qua Argo CD (App of Apps):**
+
+Nhờ `finalizers` đã được cấu hình, khi xóa App gốc, Argo CD tự động dọn sạch toàn bộ tài nguyên con — bao gồm cả Ingress và ALB:
 
 ```bash
-kubectl delete ingress housing-ingress -n housing-dev
-kubectl delete ingress housing-ingress -n housing-prod
+kubectl delete -k argocd/root/
 ```
 
-**2. Chờ ALB biến mất hoàn toàn:**
+**2. Chờ AWS thu hồi Load Balancer:**
 
-Vào AWS Console → EC2 → Load Balancers, đợi khoảng 2–3 phút cho đến khi các ALB không còn xuất hiện.
+Vào AWS Console → EC2 → Load Balancers, đợi khoảng 2–3 phút cho đến khi các ALB của Dev và Prod biến mất hoàn toàn.
 
 **3. Chạy terraform destroy:**
 

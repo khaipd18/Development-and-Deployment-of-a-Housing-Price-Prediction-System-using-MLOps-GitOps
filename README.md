@@ -170,22 +170,27 @@ Keep the terminal running and open: **http://localhost:3100**
 
 > **Read this before running `terraform destroy`**
 
-The ALBs in this project are not managed by Terraform — they are created automatically by the AWS Load Balancer Controller when Kubernetes applies `ingress.yaml`. This means Terraform has no knowledge of them and will not delete them on its own.
+When shutting down the system to save costs, **you must remove all Kubernetes application resources (especially Ingresses) before running `terraform destroy` in the infrastructure repo.**
 
-If you run `terraform destroy` immediately, these ALBs will still hold ENIs inside the Subnet, causing VPC deletion to fail.
+**Why?**
 
-**Correct teardown order:**
+> The ALBs in this project are created automatically by the **AWS Load Balancer Controller** inside EKS — not by Terraform. If you run `terraform destroy` right away, Terraform will fail to delete the VPC because these ALBs are still holding Network Interfaces (ENIs) inside the Subnet.
+>
+> **Important:** Do not use `kubectl delete ingress` manually — Argo CD has `selfHeal` enabled and will immediately recreate the ALB as soon as you delete it. The only clean way is to delete the Argo CD Applications entirely.
 
-**1. Delete the Ingress resources so Kubernetes reclaims the ALBs:**
+**Correct teardown order (Cascade Delete):**
+
+**1. Remove all applications via Argo CD (App of Apps):**
+
+Thanks to the `finalizers` configured in the root app, deleting it will cause Argo CD to automatically clean up all child resources — including Ingresses and ALBs:
 
 ```bash
-kubectl delete ingress housing-ingress -n housing-dev
-kubectl delete ingress housing-ingress -n housing-prod
+kubectl delete -k argocd/root/
 ```
 
 **2. Wait for the ALBs to be fully removed:**
 
-Go to AWS Console → EC2 → Load Balancers and wait 2–3 minutes until they disappear.
+Go to AWS Console → EC2 → Load Balancers and wait 2–3 minutes until the Dev and Prod ALBs disappear.
 
 **3. Run terraform destroy:**
 
