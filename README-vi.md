@@ -166,31 +166,63 @@ Giữ terminal chạy, mở trình duyệt vào: **http://localhost:3100**
 
 ---
 
-## 🧹 5. Hướng dẫn gỡ bỏ hệ thống (Teardown)
+## 🧹 5. Quy trình gỡ bỏ hệ thống bắt buộc (Teardown Guide)
 
-Khi muốn dọn dẹp hệ thống để tiết kiệm chi phí, **bạn bắt buộc phải xóa toàn bộ tài nguyên ứng dụng trên Kubernetes (đặc biệt là Ingress) trước khi chạy `terraform destroy` bên repo hạ tầng.**
+Khi muốn hủy hệ thống để tiết kiệm chi phí, **bạn bắt buộc phải xóa toàn bộ tài nguyên ứng dụng trên Kubernetes (đặc biệt là ApplicationSet và Ingress) trước khi chạy `terraform destroy`**. Nếu không, AWS Load Balancer Controller sẽ không thể thu hồi ALB, dẫn đến việc Terraform bị kẹt/lỗi khi xóa VPC do các Network Interface (ENI) vẫn bị giữ lại.
 
-**Tại sao phải làm vậy?**
+Thực hiện dọn dẹp theo đúng thứ tự 4 bước sau:
 
-> Các ALB trong dự án được tạo tự động bởi **AWS Load Balancer Controller** bên trong EKS, không phải do Terraform quản lý. Nếu chạy `terraform destroy` ngay, Terraform sẽ không xóa được VPC vì các ALB này vẫn đang giữ Network Interface (ENI) trong Subnet.
->
-> **Lưu ý:** Không dùng `kubectl delete ingress` thủ công — Argo CD đang bật `selfHeal` và sẽ lập tức tạo lại ALB ngay khi bạn vừa xóa. Cách duy nhất là xóa toàn bộ Application.
+---
 
-**Quy trình dọn dẹp chuẩn (Cascade Delete):**
+### Bước 1 — Xóa ApplicationSet (cắt nguồn tự động đồng bộ)
 
-**1. Gỡ bỏ toàn bộ ứng dụng qua Argo CD (App of Apps):**
-
-Nhờ `finalizers` đã được cấu hình, khi xóa App gốc, Argo CD tự động dọn sạch toàn bộ tài nguyên con — bao gồm cả Ingress và ALB:
+Xóa bộ khung quản lý tự động của Argo CD để các ứng dụng con (`housing-dev`, `housing-prod`) không thể tự "hồi sinh" (Self-Heal) từ Git:
 
 ```bash
-kubectl delete -k argocd/root/
+kubectl delete applicationset housing-applications -n argocd
 ```
 
-**2. Chờ AWS thu hồi Load Balancer:**
+---
 
-Vào AWS Console → EC2 → Load Balancers, đợi khoảng 2–3 phút cho đến khi các ALB của Dev và Prod biến mất hoàn toàn.
+### Bước 2 — Ép xóa các Application còn sót lại (gỡ Finalizers)
 
-**3. Chạy terraform destroy:**
+Gỡ `finalizers` và force delete 2 ứng dụng con để Argo CD giải phóng hoàn toàn quyền quản lý:
+
+```bash
+# Gỡ bỏ finalizers
+kubectl patch app housing-dev housing-prod -n argocd \
+  -p '{"metadata":{"finalizers":null}}' --type=merge
+
+# Ép xóa lập tức
+kubectl delete app housing-dev housing-prod -n argocd --grace-period=0 --force
+```
+
+Kiểm tra lại: `kubectl get app -n argocd` sẽ không còn 2 app này nữa.
+
+---
+
+### Bước 3 — Xóa thủ công các Ingress còn lại
+
+Ra lệnh cho Kubernetes xóa Ingress để kích hoạt việc hủy ALB trên AWS:
+
+```bash
+kubectl delete ingress housing-ingress -n housing-dev
+kubectl delete ingress housing-ingress -n housing-prod
+```
+
+Kiểm tra không còn Ingress nào sót:
+
+```bash
+kubectl get ingress -A
+```
+
+---
+
+### Bước 4 — Chờ AWS thu hồi ALB rồi chạy Terraform
+
+1. Vào AWS Console → EC2 → Load Balancers
+2. Đợi khoảng 2–3 phút cho đến khi các ALB của `dev` và `prod` biến mất hoàn toàn
+3. Sau khi ALB đã sạch, chuyển sang thư mục hạ tầng và chạy:
 
 ```bash
 terraform destroy

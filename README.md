@@ -166,33 +166,63 @@ Keep the terminal running and open: **http://localhost:3100**
 
 ---
 
-## 🧹 5. Teardown
+## 🧹 5. Teardown Guide
 
-> **Read this before running `terraform destroy`**
+When shutting down the system to save costs, **you must delete all Kubernetes application resources (especially the ApplicationSet and Ingresses) before running `terraform destroy`**. Otherwise, the AWS Load Balancer Controller won't be able to reclaim the ALBs, and Terraform will get stuck when trying to delete the VPC because the Network Interfaces (ENIs) are still in use.
 
-When shutting down the system to save costs, **you must remove all Kubernetes application resources (especially Ingresses) before running `terraform destroy` in the infrastructure repo.**
+Follow these 4 steps in order:
 
-**Why?**
+---
 
-> The ALBs in this project are created automatically by the **AWS Load Balancer Controller** inside EKS — not by Terraform. If you run `terraform destroy` right away, Terraform will fail to delete the VPC because these ALBs are still holding Network Interfaces (ENIs) inside the Subnet.
->
-> **Important:** Do not use `kubectl delete ingress` manually — Argo CD has `selfHeal` enabled and will immediately recreate the ALB as soon as you delete it. The only clean way is to delete the Argo CD Applications entirely.
+### Step 1 — Delete the ApplicationSet (cut off auto-sync)
 
-**Correct teardown order (Cascade Delete):**
-
-**1. Remove all applications via Argo CD (App of Apps):**
-
-Thanks to the `finalizers` configured in the root app, deleting it will cause Argo CD to automatically clean up all child resources — including Ingresses and ALBs:
+Remove the Argo CD management layer so the child apps (`housing-dev`, `housing-prod`) can no longer self-heal from Git:
 
 ```bash
-kubectl delete -k argocd/root/
+kubectl delete applicationset housing-applications -n argocd
 ```
 
-**2. Wait for the ALBs to be fully removed:**
+---
 
-Go to AWS Console → EC2 → Load Balancers and wait 2–3 minutes until the Dev and Prod ALBs disappear.
+### Step 2 — Force-delete remaining Applications (strip Finalizers)
 
-**3. Run terraform destroy:**
+Remove `finalizers` and force-delete both child apps so Argo CD fully releases its ownership:
+
+```bash
+# Strip finalizers
+kubectl patch app housing-dev housing-prod -n argocd \
+  -p '{"metadata":{"finalizers":null}}' --type=merge
+
+# Force delete
+kubectl delete app housing-dev housing-prod -n argocd --grace-period=0 --force
+```
+
+Verify: `kubectl get app -n argocd` should no longer show these two apps.
+
+---
+
+### Step 3 — Manually delete the remaining Ingresses
+
+Tell Kubernetes to delete the Ingresses, which triggers ALB deprovisioning on AWS:
+
+```bash
+kubectl delete ingress housing-ingress -n housing-dev
+kubectl delete ingress housing-ingress -n housing-prod
+```
+
+Confirm nothing is left:
+
+```bash
+kubectl get ingress -A
+```
+
+---
+
+### Step 4 — Wait for ALBs to be removed, then run Terraform
+
+1. Go to AWS Console → EC2 → Load Balancers
+2. Wait 2–3 minutes until the `dev` and `prod` ALBs have fully disappeared
+3. Once the ALBs are gone, switch to the infrastructure directory and run:
 
 ```bash
 terraform destroy
