@@ -20,7 +20,19 @@ Dự án tự xây một **Local Helm Chart** (`standard-microservice`) chứa c
 
 ### 1.3. Canary Deployment với Argo Rollouts (Prod)
 
-Môi trường Production không dùng `Deployment` tiêu chuẩn mà chuyển sang `Rollout`. Khi có version mới, traffic được chuyển dần theo các bước: **20% → chờ 10 phút kiểm tra lỗi → 50% → chờ duyệt thủ công → 100%**.
+Môi trường Production không dùng `Deployment` tiêu chuẩn mà chuyển sang `Rollout`. Khi có version mới, traffic được chuyển dần theo các bước. **API** dùng **20% → chờ 10 phút kiểm tra lỗi → 50% → chờ duyệt thủ công → 100%**; **UI** và **Web** (nhẹ hơn) dùng **50% → chờ 5 phút → 100%**.
+
+### 1.4. Các service & định tuyến Ingress
+
+Ba microservice cùng dùng một Helm chart, expose qua **một AWS ALB Ingress**:
+
+| Đường dẫn | Service | Mô tả |
+|---|---|---|
+| `/` | **housing-web** | Frontend web tùy biến (nginx); tự proxy `/api/*` sang API (cùng origin, khỏi CORS) |
+| `/streamlit` | **housing-ui** | Dashboard Streamlit (nội bộ / demo) |
+| `/predict`, `/docs`, `/openapi.json` | **housing-api** | Service FastAPI + Swagger docs |
+
+Image kéo từ Amazon ECR (account `090885120487`, region `ap-southeast-1`). CI ở repo chính tự cập nhật (bump) image tag của từng service trong `overlays/*` mỗi lần push.
 
 ---
 
@@ -28,13 +40,13 @@ Môi trường Production không dùng `Deployment` tiêu chuẩn mà chuyển s
 
 ```text
 📦 GitOps-Repository
- ┣ 📂 app                      # Cấu hình triển khai API & UI
+ ┣ 📂 app                      # Cấu hình triển khai API, UI & Web
  ┃ ┣ 📂 base                   # Cấu hình gốc dùng chung cho mọi môi trường
- ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress
- ┃ ┃ ┣ 📂 api & 📂 ui          # values.yaml cơ sở cho Helm chart
- ┃ ┗ 📂 overlays               # Cấu hình ghi đè theo môi trường
+ ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress (/ → web, /streamlit → ui, /predict,/docs → api)
+ ┃ ┃ ┣ 📂 api, 📂 ui & 📂 web  # values.yaml cơ sở từng service cho Helm chart
+ ┃ ┗ 📂 overlays               # Cấu hình ghi đè theo môi trường (api, ui, web)
  ┃   ┣ 📂 dev                  # Dev: 1 replica, resource thấp
- ┃   ┗ 📂 prod                 # Prod: 3 replicas + kịch bản Canary
+ ┃   ┗ 📂 prod                 # Prod: 3 replicas + kịch bản Canary (Rollout)
  ┣ 📂 argocd
  ┃ ┣ 📂 applications           # ApplicationSet tự tạo app từ thư mục overlays
  ┃ ┣ 📂 infrastructure         # AWS LB Controller, Argo Rollouts
@@ -153,6 +165,8 @@ Sau khi xác nhận version mới ổn định, promote lên bước tiếp theo
 ```bash
 kubectl argo rollouts promote housing-api -n housing-prod
 ```
+
+> Các lệnh `get` / `promote` tương tự áp dụng cho `housing-ui` và `housing-web`.
 
 ---
 

@@ -20,7 +20,19 @@ The project ships a custom **Local Helm Chart** (`standard-microservice`) with s
 
 ### 1.3. Canary Deployment with Argo Rollouts (Prod)
 
-The Production environment uses `Rollout` instead of a standard Kubernetes `Deployment`. When a new version is released, traffic shifts gradually: **20% → wait 10 min for error check → 50% → manual approval → 100%**.
+The Production environment uses `Rollout` instead of a standard Kubernetes `Deployment`. When a new version is released, traffic shifts gradually. The **API** uses **20% → wait 10 min for error check → 50% → manual approval → 100%**; the lighter **UI** and **Web** use **50% → wait 5 min → 100%**.
+
+### 1.4. Services & Ingress Routing
+
+Three microservices are deployed from the same Helm chart and exposed through a single AWS ALB Ingress:
+
+| Path | Service | Description |
+|---|---|---|
+| `/` | **housing-web** | Custom web frontend (nginx); proxies `/api/*` to the API internally (same origin, no CORS) |
+| `/streamlit` | **housing-ui** | Streamlit dashboard (internal / demo) |
+| `/predict`, `/docs`, `/openapi.json` | **housing-api** | FastAPI service + Swagger docs |
+
+Images are pulled from Amazon ECR (account `090885120487`, region `ap-southeast-1`). CI in the main app repo bumps each service's image tag in the `overlays/*` values on every push.
 
 ---
 
@@ -28,13 +40,13 @@ The Production environment uses `Rollout` instead of a standard Kubernetes `Depl
 
 ```text
 📦 GitOps-Repository
- ┣ 📂 app                      # Deployment config for API & UI
+ ┣ 📂 app                      # Deployment config for API, UI & Web
  ┃ ┣ 📂 base                   # Shared base config for all environments
- ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress
- ┃ ┃ ┣ 📂 api & 📂 ui          # Base values.yaml for Helm chart
- ┃ ┗ 📂 overlays               # Environment-specific overrides
+ ┃ ┃ ┣ 📜 ingress.yaml         # AWS ALB Ingress (/ → web, /streamlit → ui, /predict,/docs → api)
+ ┃ ┃ ┣ 📂 api, 📂 ui & 📂 web  # Base values.yaml per service for the Helm chart
+ ┃ ┗ 📂 overlays               # Environment-specific overrides (api, ui, web)
  ┃   ┣ 📂 dev                  # Dev: 1 replica, low resource limits
- ┃   ┗ 📂 prod                 # Prod: 3 replicas + Canary strategy
+ ┃   ┗ 📂 prod                 # Prod: 3 replicas + Canary strategy (Rollout)
  ┣ 📂 argocd
  ┃ ┣ 📂 applications           # ApplicationSet — auto-generates apps from overlays
  ┃ ┣ 📂 infrastructure         # AWS LB Controller, Argo Rollouts
@@ -153,6 +165,8 @@ Once the new version looks stable, promote to the next step:
 ```bash
 kubectl argo rollouts promote housing-api -n housing-prod
 ```
+
+> The same `get` / `promote` commands work for `housing-ui` and `housing-web`.
 
 ---
 
