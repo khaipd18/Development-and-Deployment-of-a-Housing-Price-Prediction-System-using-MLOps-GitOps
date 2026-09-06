@@ -1,0 +1,52 @@
+deployment:
+  enabled: true
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  name: "housing-web"
+
+# nginx bind cổng 80 (privileged) -> master chạy root, worker tự hạ xuống user nginx.
+# Không đặt runAsUser để không chặn bind :80; vẫn chặn leo thang đặc quyền.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+image:
+  repository: "090885120487.dkr.ecr.ap-southeast-1.amazonaws.com/housing-web"
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+probes:
+  readiness:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+
+  liveness:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    successThreshold: 1
+    failureThreshold: 3

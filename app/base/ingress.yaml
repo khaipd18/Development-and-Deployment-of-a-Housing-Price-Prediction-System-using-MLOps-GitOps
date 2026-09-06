@@ -40,11 +40,21 @@ spec:
                 port:
                   number: 8000
 
-          # --- RULE MẶC ĐỊNH CỦA UI (Streamlit) ---
-          - path: /
+          # --- Streamlit (dashboard nội bộ) tại /streamlit ---
+          - path: /streamlit
             pathType: Prefix
             backend:
               service:
                 name: housing-ui
                 port:
                   number: 8501
+
+          # --- Web tùy biến (frontend CHÍNH) tại / ---
+          # nginx trong web tự proxy /api -> housing-api (cùng origin, khỏi CORS).
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: housing-web
+                port:
+                  number: 80

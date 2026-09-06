@@ -22,7 +22,7 @@ spec:
           value: "aws-load-balancer-controller"
           
         - name: serviceAccount.annotations.eks\.amazonaws\.com/role-arn
-          value: "arn:aws:iam::770353436964:role/housing-mlops-aws-lb-controller-role"
+          value: "arn:aws:iam::090885120487:role/housing-mlops-aws-lb-controller-role"
           
   destination:
     server: 'https://kubernetes.default.svc'

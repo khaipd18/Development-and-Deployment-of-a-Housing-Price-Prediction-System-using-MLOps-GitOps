@@ -19,3 +19,9 @@ helmCharts:
     valuesFile: ../../base/ui/values.yaml
     additionalValuesFiles:
       - ui/values-dev.yaml
+
+  - name: helm-charts
+    releaseName: housing-web
+    valuesFile: ../../base/web/values.yaml
+    additionalValuesFiles:
+      - web/values-dev.yaml

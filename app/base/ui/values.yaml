@@ -13,7 +13,7 @@ podSecurityContext:
   fsGroup: 1000
 
 image:
-  repository: "770353436964.dkr.ecr.ap-southeast-1.amazonaws.com/housing-ui" 
+  repository: "090885120487.dkr.ecr.ap-southeast-1.amazonaws.com/housing-ui" 
   tag: "latest"
   pullPolicy: Always
 
@@ -31,7 +31,10 @@ env:
   STREAMLIT_SERVER_PORT: "8501"
   STREAMLIT_SERVER_ADDRESS: "0.0.0.0"
   STREAMLIT_SERVER_HEADLESS: "true"
-  API_URL: http://housing-api:8000/predict
+  # Streamlit phục vụ dưới /streamlit (ingress) -> phải khai báo base path.
+  STREAMLIT_SERVER_BASE_URL_PATH: "streamlit"
+  # HCM ui gọi API theo BASE url rồi tự nối /predict,/options,... (KHÔNG kèm /predict)
+  API_URL: http://housing-api:8000
 
 resources:
   limits:
@@ -44,7 +47,7 @@ resources:
 probes:
   readiness:
     httpGet:
-      path: /_stcore/health
+      path: /streamlit/_stcore/health
       port: 8501
     initialDelaySeconds: 15 
     periodSeconds: 10
@@ -53,7 +56,7 @@ probes:
   
   liveness:
     httpGet:
-      path: /_stcore/health
+      path: /streamlit/_stcore/health
       port: 8501
     initialDelaySeconds: 20
     periodSeconds: 20
