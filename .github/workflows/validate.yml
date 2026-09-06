@@ -1,0 +1,43 @@
+name: Validate manifests
+
+# CI cho repo GitOps: render Kustomize+Helm (như ArgoCD) rồi kiểm manifest bằng
+# kubeconform -> bắt lỗi cấu hình NGAY trong PR, thay vì đợi ArgoCD sync mới lộ.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-validate:
+    name: Kustomize build + kubeconform (dev & prod)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Install helm, kustomize, kubeconform (pinned)
+        run: |
+          set -e
+          curl -sSL https://get.helm.sh/helm-v3.16.4-linux-amd64.tar.gz | tar -xz linux-amd64/helm
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz" | tar -xz kustomize
+          sudo mv kustomize /usr/local/bin/kustomize
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar -xz kubeconform
+          sudo mv kubeconform /usr/local/bin/kubeconform
+          helm version; kustomize version; kubeconform -v
+
+      - name: Render + validate overlays
+        run: |
+          set -euo pipefail
+          for env in dev prod; do
+            echo "==================== $env ===================="
+            kustomize build --enable-helm --load-restrictor LoadRestrictionsNone "app/overlays/$env" \
+              | kubeconform -strict -summary -ignore-missing-schemas \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}.json'
+          done
