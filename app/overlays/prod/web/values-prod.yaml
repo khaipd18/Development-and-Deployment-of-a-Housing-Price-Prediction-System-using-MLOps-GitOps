@@ -4,12 +4,10 @@ deployment:
 replicaCount: 3
 resources:
   limits:
-    cpu: 1000m
-    memory: 2Gi
+    cpu: 300m
+    memory: 128Mi
   requests:
-    cpu: 500m
-    memory: 1Gi
-env:
-  STREAMLIT_SERVER_GATHER_USAGE_STATS: "false"
+    cpu: 100m
+    memory: 64Mi
 image:
   tag: 3fc79aa5417087ffe557fe63fb277b47d15a96ef

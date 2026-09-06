@@ -1,10 +1,10 @@
 replicaCount: 1
 resources:
   limits:
-    cpu: 250m
-    memory: 256Mi
-  requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 64Mi
+  requests:
+    cpu: 25m
+    memory: 32Mi
 image:
   tag: 3fc79aa5417087ffe557fe63fb277b47d15a96ef

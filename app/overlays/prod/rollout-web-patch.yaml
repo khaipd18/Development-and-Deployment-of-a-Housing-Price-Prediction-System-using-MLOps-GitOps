@@ -1,0 +1,12 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: housing-web
+spec:
+  strategy:
+    canary:
+      steps:
+        # web tĩnh (nginx) — đổi bản nhẹ nhàng: 50% -> theo dõi 5 phút -> 100%
+        - setWeight: 50
+        - pause: { duration: 5m }
+        - setWeight: 100
