@@ -1,0 +1,103 @@
+# MLflow tracking server trên EKS (manifest thuần cho dễ kiểm soát).
+#   - backend store: RDS Postgres (secret mlflow-backend/uri — tạo lúc bootstrap)
+#   - artifact store: S3 kltn-hcm-mlops-artifacts/mlflow (quyền qua IRSA)
+#   - ảnh burakince/mlflow đã kèm psycopg2 + boto3
+# ServiceAccount mlflow được gắn IRSA role qua annotation (bootstrap patch ARN thật).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlflow
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mlflow
+  namespace: mlflow
+  annotations:
+    # IRSA role (tên cố định theo project_name -> hardcode được, giống aws-lb-controller)
+    eks.amazonaws.com/role-arn: "arn:aws:iam::090885120487:role/housing-mlops-mlflow-irsa"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: mlflow
+  labels: { app: mlflow }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mlflow }
+  template:
+    metadata:
+      labels: { app: mlflow }
+    spec:
+      serviceAccountName: mlflow
+      containers:
+        - name: mlflow
+          image: burakince/mlflow:2.16.2
+          command: ["mlflow"]
+          args:
+            - "server"
+            - "--host=0.0.0.0"
+            - "--port=5000"
+            - "--backend-store-uri=$(MLFLOW_BACKEND_STORE_URI)"
+            - "--default-artifact-root=s3://kltn-hcm-mlops-artifacts/mlflow"
+            - "--serve-artifacts"
+          env:
+            - name: MLFLOW_BACKEND_STORE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-backend
+                  key: uri
+            - name: AWS_DEFAULT_REGION
+              value: "ap-southeast-1"
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet: { path: /health, port: 5000 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /health, port: 5000 }
+            initialDelaySeconds: 40
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: mlflow
+spec:
+  selector: { app: mlflow }
+  ports:
+    - port: 80
+      targetPort: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mlflow
+  namespace: mlflow
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    # bootstrap patch ARN cert self-signed (output ingress_acm_certificate_arn)
+    alb.ingress.kubernetes.io/certificate-arn: "REPLACE_WITH_ACM_ARN"
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mlflow
+                port:
+                  number: 80

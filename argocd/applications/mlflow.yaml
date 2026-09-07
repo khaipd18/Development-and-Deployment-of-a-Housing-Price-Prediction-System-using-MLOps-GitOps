@@ -1,0 +1,23 @@
+# ArgoCD Application: MLflow tracking server (manifest thuần ở platform/mlflow).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/khaipd18/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps-GitOps.git'
+    targetRevision: HEAD
+    path: platform/mlflow
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
