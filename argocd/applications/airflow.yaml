@@ -1,0 +1,109 @@
+# ArgoCD Application: Apache Airflow (orchestrator Continuous Training) trên EKS.
+#   - Helm chart chính thức apache-airflow, executor = KubernetesExecutor
+#     (mỗi task = 1 pod ephemeral -> scale-to-zero, rẻ)
+#   - Ảnh tùy biến housing-airflow (ECR): kèm code dự án + DAG + deps ML
+#   - Metadata -> RDS Postgres qua secret airflow-metadata (key: connection)
+#   - IRSA gắn vào SA airflow (quyền S3 read data + rw artifacts)
+#   - MLFLOW_TRACKING_URI trỏ MLflow in-cluster
+#
+# ⚠ Version chart + value keys nên đối chiếu lại lúc apply (Airflow chart hay đổi).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: 'https://airflow.apache.org'
+    chart: airflow
+    targetRevision: 1.15.0
+    helm:
+      values: |
+        executor: "KubernetesExecutor"
+
+        # Ảnh tùy biến (build từ docker/Dockerfile.airflow, push ECR)
+        images:
+          airflow:
+            repository: 090885120487.dkr.ecr.ap-southeast-1.amazonaws.com/housing-airflow
+            tag: latest
+            pullPolicy: Always
+
+        # DAG bake sẵn trong ảnh -> tắt gitSync & persistence
+        dags:
+          gitSync:
+            enabled: false
+          persistence:
+            enabled: false
+
+        # Không dùng Postgres/Redis kèm chart -> trỏ RDS ngoài qua secret
+        postgresql:
+          enabled: false
+        pgbouncer:
+          enabled: false
+        redis:
+          enabled: false
+        data:
+          # secret 'airflow-metadata' tạo lúc bootstrap, key 'connection' =
+          # postgresql+psycopg2://platform_admin:...@<rds>:5432/airflow
+          metadataSecretName: airflow-metadata
+
+        # ServiceAccount + IRSA (tên role cố định -> hardcode)
+        serviceAccount:
+          create: true
+          name: airflow
+          annotations:
+            eks.amazonaws.com/role-arn: "arn:aws:iam::090885120487:role/housing-mlops-airflow-irsa"
+
+        # Biến môi trường chung cho scheduler/worker/webserver
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.mlflow.svc.cluster.local"
+          - name: AWS_DEFAULT_REGION
+            value: "ap-southeast-1"
+          - name: PYTHONPATH
+            value: "/opt/airflow/project"
+
+        # Tài khoản đăng nhập UI (demo)
+        webserver:
+          defaultUser:
+            enabled: true
+            username: admin
+            password: admin
+            role: Admin
+            email: admin@example.com
+          service:
+            type: ClusterIP
+
+        # Ingress qua ALB (TLS self-signed; bootstrap patch certificate-arn)
+        ingress:
+          web:
+            enabled: true
+            ingressClassName: alb
+            annotations:
+              alb.ingress.kubernetes.io/scheme: internet-facing
+              alb.ingress.kubernetes.io/target-type: ip
+              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+              alb.ingress.kubernetes.io/ssl-redirect: '443'
+              alb.ingress.kubernetes.io/certificate-arn: "REPLACE_WITH_ACM_ARN"
+              alb.ingress.kubernetes.io/healthcheck-path: /health
+            path: /
+            pathType: Prefix
+
+        # Jobs khởi tạo (migrate schema + tạo user) — bật mặc định
+        migrateDatabaseJob:
+          enabled: true
+        createUserJob:
+          enabled: true
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: airflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
