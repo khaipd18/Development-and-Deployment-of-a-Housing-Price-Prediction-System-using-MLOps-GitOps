@@ -12,4 +12,4 @@ resources:
 env:
   STREAMLIT_SERVER_GATHER_USAGE_STATS: "false"
 image:
-  tag: ee111900fe023469e139fc6909b4ce6352a2d37b
+  tag: 7690f8aa17b1a2829b4166897fab3c7e0696d020
