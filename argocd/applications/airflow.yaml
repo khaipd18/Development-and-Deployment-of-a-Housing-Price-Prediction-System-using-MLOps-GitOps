@@ -65,6 +65,14 @@ spec:
             value: "ap-southeast-1"
           - name: PYTHONPATH
             value: "/opt/airflow/project"
+          # Bật S3 cho Continuous Training: DAG kéo dataset sạch từ bucket DATA
+          # (keo_du_lieu_sach) + đẩy model lên ARTIFACTS. Creds qua IRSA (SA airflow).
+          - name: HCM_S3_PUSH
+            value: "1"
+          - name: S3_BUCKET_DATA
+            value: "kltn-hcm-mlops-data"
+          - name: S3_BUCKET_ARTIFACTS
+            value: "kltn-hcm-mlops-artifacts"
 
         # Tài khoản đăng nhập UI (demo)
         webserver:
