@@ -41,3 +41,35 @@ jobs:
                   -schema-location default \
                   -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}.json'
           done
+
+      # Manifest ngoài app/overlays trước đây KHÔNG được kiểm gì cả: Application của
+      # ArgoCD, ServiceMonitor, PrometheusRule, ConfigMap dashboard. Gõ sai ở đó chỉ lộ
+      # khi đã dựng cụm — tức là lúc đang tốn tiền. Kiểm luôn tại PR.
+      - name: Validate ArgoCD Applications + manifest quan trắc
+        run: |
+          set -euo pipefail
+          for dir in argocd observability; do
+            echo "==================== $dir ===================="
+            kubeconform -strict -summary -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}.json' \
+                $(find "$dir" -name '*.yaml' -not -name 'kustomization.yaml')
+          done
+
+      # Dashboard nhúng JSON trong YAML — YAML hợp lệ không có nghĩa JSON bên trong
+      # hợp lệ. Panel hỏng chỉ hiện ra khi mở Grafana, nên parse luôn ở đây.
+      - name: Kiểm JSON dashboard nhúng trong ConfigMap
+        run: |
+          python3 - <<'EOS'
+          import glob, json, sys, yaml
+          ok = 0
+          for f in glob.glob("observability/grafana-dashboard-*.yaml"):
+              cm = yaml.safe_load(open(f))
+              for key, body in (cm.get("data") or {}).items():
+                  d = json.loads(body)
+                  assert d.get("panels"), f"{f}:{key} không có panel nào"
+                  print(f"  ok {f}:{key} — {len(d['panels'])} panel")
+                  ok += 1
+          if ok == 0:
+              sys.exit("Không tìm thấy dashboard nào để kiểm")
+          EOS
