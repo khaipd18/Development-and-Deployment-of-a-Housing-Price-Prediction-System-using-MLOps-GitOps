@@ -15,12 +15,6 @@ helmCharts:
       - api/values-prod.yaml
 
   - name: helm-charts
-    releaseName: housing-ui
-    valuesFile: ../../base/ui/values.yaml
-    additionalValuesFiles:
-      - ui/values-prod.yaml
-
-  - name: helm-charts
     releaseName: housing-web
     valuesFile: ../../base/web/values.yaml
     additionalValuesFiles:
@@ -33,12 +27,6 @@ patches:
       kind: Rollout          
       name: housing-api
       
-  - path: rollout-ui-patch.yaml
-    target:
-      group: argoproj.io
-      kind: Rollout
-      name: housing-ui
-
   - path: rollout-web-patch.yaml
     target:
       group: argoproj.io
