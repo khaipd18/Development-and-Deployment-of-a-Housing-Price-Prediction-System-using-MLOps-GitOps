@@ -24,6 +24,25 @@ spec:
     helm:
       releaseName: kube-prometheus-stack
       values: |
+        # Trên EKS, control plane do AWS quản lý: kube-controller-manager,
+        # kube-scheduler và etcd KHÔNG có endpoint nào trong cụm để scrape (số đo của
+        # chúng nằm sau API group metrics.eks.amazonaws.com trên API server, xem
+        # https://docs.aws.amazon.com/eks/latest/userguide/view-raw-metrics.html).
+        # Để mặc định `true` thì chart vẫn dựng Service + ServiceMonitor cho ba thành
+        # phần đó, service discovery tìm thấy 0 target, và alert mặc định dựa trên
+        # absent(up{...}) bắn vĩnh viễn: đã kiểm chứng KubeControllerManagerDown và
+        # KubeSchedulerDown firing trên cụm hoàn toàn khoẻ. Nhiễu kiểu đó làm alert
+        # thật của housing-api bị lẫn, nên tắt cả scrape job lẫn rule.
+        # kubeProxy thì GIỮ: đã kiểm chứng có 3 target và up=1 trên cụm này.
+        kubeControllerManager: {enabled: false}
+        kubeScheduler: {enabled: false}
+        kubeEtcd: {enabled: false}
+        defaultRules:
+          rules:
+            kubeControllerManager: false
+            kubeSchedulerAlerting: false
+            kubeSchedulerRecording: false
+            etcd: false
         grafana:
           adminPassword: admin          # cụm tạm, không public; đổi nếu để chạy lâu
           persistence:
