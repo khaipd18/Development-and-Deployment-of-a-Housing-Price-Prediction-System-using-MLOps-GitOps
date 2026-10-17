@@ -18,9 +18,19 @@ spec:
         # một định nghĩa, tránh mỗi nơi viết một kiểu rồi lệch nhau.
         - record: housing:api_request_rate5m
           expr: sum by (namespace) (rate(http_requests_total{job="housing-api"}[5m]))
+        # `or ... * 0` là phần bắt buộc, không phải cho đẹp: khi KHÔNG có request 5xx
+        # nào thì tử số không sinh chuỗi, phép chia ra rỗng, và hậu quả là alert
+        # HousingApiHighErrorRate vĩnh viễn không có gì để so ngưỡng còn dashboard
+        # hiện "No data" thay vì 0%. Nhân 0 vào chuỗi tổng để luôn có một chuỗi giá
+        # trị 0 cho mỗi namespace đang có traffic. clamp_min chỉ bảo vệ MẪU SỐ nên
+        # một mình nó không giải quyết được.
         - record: housing:api_error_ratio5m
           expr: |
-            sum by (namespace) (rate(http_requests_total{job="housing-api",status=~"5.."}[5m]))
+            (
+              sum by (namespace) (rate(http_requests_total{job="housing-api",status=~"5.."}[5m]))
+              or
+              sum by (namespace) (rate(http_requests_total{job="housing-api"}[5m])) * 0
+            )
             /
             clamp_min(sum by (namespace) (rate(http_requests_total{job="housing-api"}[5m])), 1e-9)
         - record: housing:api_latency_p95_5m
