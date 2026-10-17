@@ -94,7 +94,18 @@ spec:
                 index: {prefix: index_, period: 24h}
         singleBinary:
           replicas: 1
+          # Container chạy với readOnlyRootFilesystem: true, nên tắt persistence
+          # thôi là Loki không có chỗ ghi và chết với
+          #   mkdir /var/loki: read-only file system
+          # Gắn emptyDir thay vì bật PVC: cụm là tạm, emptyDir không tạo EBS nên
+          # không có volume nào sống sót sau destroy để rò rỉ chi phí.
           persistence: {enabled: false}
+          extraVolumes:
+            - name: loki-data
+              emptyDir: {}
+          extraVolumeMounts:
+            - name: loki-data
+              mountPath: /var/loki
         # Các thành phần của chế độ phân tán phải tắt hẳn, nếu không chart vẫn dựng pod
         read: {replicas: 0}
         write: {replicas: 0}
