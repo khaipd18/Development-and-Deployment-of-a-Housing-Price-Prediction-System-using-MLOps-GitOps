@@ -1,0 +1,24 @@
+# Bảo Prometheus scrape /metrics của housing-api ở cả hai môi trường.
+# Nhãn metric do API phát ra (đã kiểm chứng bằng cách chạy thật rồi đọc /metrics):
+#   http_request_duration_seconds_bucket{handler,method,le}
+#   http_requests_total{handler,method,status}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: housing-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: housing-mlops
+spec:
+  namespaceSelector:
+    matchNames: [housing-dev, housing-prod]
+  # Nhãn khớp đúng chart đang dùng: template Service gắn `app: {{ .Release.Name }}`,
+  # không phải app.kubernetes.io/name. Chọn sai nhãn thì Prometheus không scrape mà
+  # cũng không báo lỗi — mọi panel sẽ trống trong im lặng.
+  selector:
+    matchLabels:
+      app: housing-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

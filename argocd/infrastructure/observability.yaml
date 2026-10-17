@@ -1,0 +1,187 @@
+# Stack Observability cho T11: Prometheus + Grafana + Alertmanager (kube-prometheus-stack),
+# Loki (log) và Alloy (thu log về Loki).
+#
+# Vì sao không dùng loki-stack hay promtail: cả hai chart đó đã `deprecated: true`
+# trên repo chính thức của Grafana. Dùng loki (SingleBinary) + alloy là bản còn
+# được bảo trì.
+#
+# Cụm theo chủ trương bật-test-rồi-destroy nên KHÔNG bật persistence: dữ liệu quan
+# trắc sống theo vòng đời cụm, mất khi destroy là chấp nhận được và tiết kiệm EBS.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # CRD ServiceMonitor/PrometheusRule phải có trước
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.10.1
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        grafana:
+          adminPassword: admin          # cụm tạm, không public; đổi nếu để chạy lâu
+          persistence:
+            enabled: false
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard  # tự nạp ConfigMap có nhãn này
+              searchNamespaces: ALL
+            datasources:
+              enabled: true
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki-gateway.observability.svc.cluster.local
+              access: proxy
+        prometheus:
+          prometheusSpec:
+            retention: 6h               # cụm tạm, không cần giữ lâu
+            # Nhận MỌI ServiceMonitor/PrometheusRule trong cụm, không chỉ cái có
+            # nhãn release=kube-prometheus-stack — nếu không thì ServiceMonitor của
+            # housing-api sẽ bị bỏ qua trong im lặng.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            storageSpec: {}
+            resources:
+              requests: {cpu: 200m, memory: 512Mi}
+        alertmanager:
+          alertmanagerSpec:
+            storage: {}
+            resources:
+              requests: {cpu: 50m, memory: 128Mi}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true      # CRD của chart vượt giới hạn annotation của client-side apply
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 7.3.0
+    helm:
+      releaseName: loki
+      values: |
+        deploymentMode: SingleBinary    # cụm nhỏ, không cần tách read/write/backend
+        loki:
+          auth_enabled: false
+          commonConfig: {replication_factor: 1}
+          storage: {type: filesystem}
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index: {prefix: index_, period: 24h}
+        singleBinary:
+          replicas: 1
+          persistence: {enabled: false}
+        # Các thành phần của chế độ phân tán phải tắt hẳn, nếu không chart vẫn dựng pod
+        read: {replicas: 0}
+        write: {replicas: 0}
+        backend: {replicas: 0}
+        chunksCache: {enabled: false}
+        resultsCache: {enabled: false}
+        lokiCanary: {enabled: false}
+        test: {enabled: false}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.13.1
+    helm:
+      releaseName: alloy
+      values: |
+        controller:
+          type: daemonset          # thu log trên mọi node
+        alloy:
+          configMap:
+            content: |
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+              discovery.relabel "pods" {
+                targets = discovery.kubernetes.pods.targets
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+              }
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pods.output
+                forward_to = [loki.write.default.receiver]
+              }
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+                }
+              }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+---
+# ServiceMonitor, PrometheusRule và dashboard của riêng dự án.
+# sync-wave "1" để chạy SAU kube-prometheus-stack (wave "-1"): hai kind đầu là CRD
+# do chart đó cài, apply trước khi CRD tồn tại sẽ hỏng.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: housing-observability
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/khaipd18/Development-and-Deployment-of-a-Housing-Price-Prediction-System-using-MLOps-GitOps.git'
+    targetRevision: HEAD
+    path: observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
