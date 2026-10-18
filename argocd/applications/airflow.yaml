@@ -103,6 +103,15 @@ spec:
         # Jobs khởi tạo (migrate schema + tạo user) — bật mặc định
         migrateDatabaseJob:
           enabled: true
+          # BẮT BUỘC với ArgoCD: chart khai job migration dưới dạng Helm hook, mà
+          # ArgoCD render chart qua `kustomize --enable-helm` nên hook bị LOẠI BỎ —
+          # job không bao giờ được tạo, DB không bao giờ migrate, và scheduler kẹt ở
+          #   TimeoutError: There are still unapplied migrations after 60 seconds.
+          #   MigrationHead(s) in DB: set()
+          # Triệu chứng là Init:Error ở scheduler/webserver, nhìn như lỗi pod chứ
+          # không ai nghĩ tới hook. Đã gặp thật trên cụm 18/10/2026.
+          useHelmHooks: false
+          applyCustomEnv: false
         # Triggerer mặc định xin một PVC cho log và PVC đó KHÔNG BAO GIỜ bind được:
         # cụm chỉ cài add-on coredns/kube-proxy/vpc-cni, không có aws-ebs-csi-driver,
         # mà StorageClass `gp2` mặc định lại trỏ vào provisioner in-tree
