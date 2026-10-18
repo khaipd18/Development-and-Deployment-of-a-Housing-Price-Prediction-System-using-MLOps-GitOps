@@ -1,0 +1,72 @@
+# Unit test PromQL cho prometheusrule-housing-api.yaml (chạy bằng `promtool test rules`).
+#
+# Dựng lại ĐÚNG tình huống đã đo trên máy ngày 18/10/2026:
+#   /predict        ~3,4ms   · 10 request/phút  -> 91% lưu lượng
+#   /explain/global ~5,3s    ·  1 request/phút  ->  9% lưu lượng
+#
+# Với tỉ lệ đó, p95 GỘP rơi vào bucket chậm (~5s) nên alert cũ dựa trên
+# housing:api_latency_p95_5m sẽ kêu, dù đường dự đoán hoàn toàn khoẻ ở mức 95ms.
+# Test này khoá lại hành vi đúng: HousingApiHighLatencyP95 KHÔNG được kêu.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # /predict: mọi request đều dưới 0,1s
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="0.1"}'
+        values: '0+10x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="1"}'
+        values: '0+10x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="5"}'
+        values: '0+10x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="10"}'
+        values: '0+10x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="+Inf"}'
+        values: '0+10x30'
+      # /explain/global: mọi request nằm trong khoảng (1s, 10s]
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/explain/global",le="0.1"}'
+        values: '0+0x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/explain/global",le="1"}'
+        values: '0+0x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/explain/global",le="5"}'
+        values: '0+1x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/explain/global",le="10"}'
+        values: '0+1x30'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/explain/global",le="+Inf"}'
+        values: '0+1x30'
+
+    promql_expr_test:
+      # Đường dự đoán vẫn nhanh.
+      - expr: housing:predict_latency_p95_5m
+        eval_time: 20m
+        exp_samples:
+          - labels: '{__name__="housing:predict_latency_p95_5m", namespace="housing-prod"}'
+            value: 9.5e-2
+      # p95 gộp bị endpoint giải thích kéo lên trên 1s -> đây chính là lý do tách rule.
+      # p95 gộp là 2,8s, vượt ngưỡng 1s -> alert CŨ sẽ kêu oan. Dùng `> bool` để
+      # khẳng định điều cần khẳng định mà không phụ thuộc đuôi dấu phẩy động
+      # (giá trị thật là 2.7999999999999954).
+      - expr: housing:api_latency_p95_5m > bool 1
+        eval_time: 20m
+        exp_samples:
+          - labels: '{namespace="housing-prod"}'
+            value: 1
+      # /explain là 4,8s: chậm thật nhưng CHƯA tới ngưỡng 8s nên không báo động giả.
+      - expr: housing:explain_latency_p95_5m < bool 8
+        eval_time: 20m
+        exp_samples:
+          - labels: '{namespace="housing-prod"}'
+            value: 1
+
+    alert_rule_test:
+      # Hành vi phải khoá: KHÔNG kêu, vì /predict khoẻ.
+      - eval_time: 25m
+        alertname: HousingApiHighLatencyP95
+        exp_alerts: []
+      # /explain 5s vẫn dưới ngưỡng 8s nên cũng không kêu.
+      - eval_time: 25m
+        alertname: HousingExplainLatencyP95
+        exp_alerts: []

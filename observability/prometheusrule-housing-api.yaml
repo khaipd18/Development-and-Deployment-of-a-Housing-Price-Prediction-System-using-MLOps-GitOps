@@ -33,10 +33,32 @@ spec:
             )
             /
             clamp_min(sum by (namespace) (rate(http_requests_total{job="housing-api"}[5m])), 1e-9)
+        # p95 TOÀN BỘ endpoint — để nhìn tổng quan trên dashboard, KHÔNG dùng để
+        # cảnh báo hay rollback, lý do ở rule kế bên.
         - record: housing:api_latency_p95_5m
           expr: |
             histogram_quantile(0.95,
               sum by (namespace, le) (rate(http_request_duration_seconds_bucket{job="housing-api"}[5m])))
+
+        # p95 CHỈ của đường dự đoán. Đây mới là thứ alert và canary T12 nhìn vào.
+        #
+        # Vì sao phải tách: /explain/global chạy TreeSHAP trên mẫu dữ liệu huấn luyện,
+        # đo được 1,33s ở mức mặc định và 5,32s ở sample_size=1000, trong khi /predict
+        # là 3,4ms. Web gọi /explain/global mỗi lần tải trang, nên chỉ cần nó chiếm hơn
+        # ~5% lưu lượng là p95 gộp vượt 1s và cảnh báo kêu dù /predict hoàn toàn khoẻ.
+        # Nguy hiểm hơn, canary T12 dùng chính số này làm căn cứ rollback, tức là sẽ
+        # rollback một bản tốt chỉ vì endpoint giải thích vốn dĩ chậm. Giải thích chậm
+        # là ĐẶC TÍNH của nó, không phải dấu hiệu hỏng.
+        - record: housing:predict_latency_p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (namespace, le) (rate(http_request_duration_seconds_bucket{job="housing-api",handler="/predict"}[5m])))
+
+        # p95 của riêng nhóm /explain — vẫn theo dõi, chỉ là bằng ngưỡng khác.
+        - record: housing:explain_latency_p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (namespace, le) (rate(http_request_duration_seconds_bucket{job="housing-api",handler=~"/explain/.*"}[5m])))
 
         # --- Cảnh báo
         - alert: HousingApiHighErrorRate
@@ -48,12 +70,23 @@ spec:
             description: "Tỷ lệ 5xx trong 5 phút là {{ $value | humanizePercentage }}. Kiểm model/encoder đã nạp được chưa, và bản vừa deploy."
 
         - alert: HousingApiHighLatencyP95
-          expr: housing:api_latency_p95_5m > 1
+          expr: housing:predict_latency_p95_5m > 1
           for: 10m
           labels: {severity: warning, component: housing-api}
           annotations:
-            summary: "housing-api p95 vượt 1s ({{ $labels.namespace }})"
-            description: "p95 hiện {{ $value | humanizeDuration }}. Xem pod có bị giới hạn CPU không, hoặc tải tăng đột biến."
+            summary: "housing-api p95 của /predict vượt 1s ({{ $labels.namespace }})"
+            description: "p95 đường dự đoán hiện {{ $value | humanizeDuration }}, bình thường là vài ms. Xem pod có bị giới hạn CPU không, hoặc tải tăng đột biến."
+
+        # Ngưỡng rộng hơn hẳn vì /explain/global tính TreeSHAP thật. 8s là mức chỉ
+        # đạt tới khi cache hỏng hoặc sample_size bị đẩy kịch trần liên tục, chứ
+        # không phải khi dùng bình thường.
+        - alert: HousingExplainLatencyP95
+          expr: housing:explain_latency_p95_5m > 8
+          for: 15m
+          labels: {severity: warning, component: housing-api}
+          annotations:
+            summary: "housing-api p95 của /explain vượt 8s ({{ $labels.namespace }})"
+            description: "p95 nhóm /explain hiện {{ $value | humanizeDuration }}. Kiểm cache của global_explanation còn hiệu lực không, và sample_size client đang gửi."
 
         - alert: HousingApiDown
           expr: up{job="housing-api"} == 0

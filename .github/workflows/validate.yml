@@ -53,7 +53,39 @@ jobs:
             kubeconform -strict -summary -ignore-missing-schemas \
                 -schema-location default \
                 -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}.json' \
-                $(find "$dir" -name '*.yaml' -not -name 'kustomization.yaml')
+                $(find "$dir" -name '*.yaml' -not -name 'kustomization.yaml' -not -path "$dir/tests/*")
+          done
+
+      # PrometheusRule: kubeconform chỉ biết manifest ĐÚNG SCHEMA, nó không hiểu
+      # PromQL bên trong. Biểu thức sai cú pháp, hoặc alert kêu oan vì gộp nhầm
+      # handler, chỉ lộ ra khi cụm đã chạy. promtool kiểm được cả hai ngay ở PR.
+      - name: promtool — kiểm cú pháp và unit test PromQL
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
+            | tar -xz prometheus-3.5.0.linux-amd64/promtool
+          sudo mv prometheus-3.5.0.linux-amd64/promtool /usr/local/bin/promtool
+          promtool --version
+
+          # File test của promtool trỏ tới `rules.yaml`, nên phải tách phần
+          # spec.groups của PrometheusRule ra thành file rời đúng tên đó.
+          mkdir -p /tmp/promtest
+          python3 - <<'EOS'
+          import glob, pathlib, yaml
+          groups = []
+          for f in glob.glob("observability/prometheusrule-*.yaml"):
+              groups += yaml.safe_load(open(f))["spec"]["groups"]
+          assert groups, "không tìm thấy PrometheusRule nào"
+          pathlib.Path("/tmp/promtest/rules.yaml").write_text(
+              yaml.safe_dump({"groups": groups}, allow_unicode=True, sort_keys=False))
+          print(f"  đã tách {len(groups)} group")
+          EOS
+
+          promtool check rules /tmp/promtest/rules.yaml
+          cp observability/tests/*_test.yaml /tmp/promtest/
+          for t in /tmp/promtest/*_test.yaml; do
+            echo "==================== $(basename "$t") ===================="
+            promtool test rules "$t"
           done
 
       # Dashboard nhúng JSON trong YAML — YAML hợp lệ không có nghĩa JSON bên trong
