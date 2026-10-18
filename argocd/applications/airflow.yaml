@@ -103,8 +103,11 @@ spec:
         # Jobs khởi tạo (migrate schema + tạo user) — bật mặc định
         migrateDatabaseJob:
           enabled: true
-        createUserJob:
-          enabled: true
+        # KHÔNG đặt `createUserJob.enabled`: chart 1.15.0 không có khoá đó và
+        # ArgoCD từ chối toàn bộ Application với
+        #   values don't meet the specifications of the schema(s) ...
+        #   at '/createUserJob' additional properties 'enabled' not allowed
+        # nên app đứng ở trạng thái Unknown chứ không phải lỗi runtime.
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: airflow
