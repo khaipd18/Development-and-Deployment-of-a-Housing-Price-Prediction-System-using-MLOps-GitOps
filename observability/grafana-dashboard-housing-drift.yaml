@@ -1,0 +1,497 @@
+# Dashboard Grafana cho Data Drift (T11). Sidecar của kube-prometheus-stack tự nạp
+# mọi ConfigMap mang nhãn grafana_dashboard="1".
+#
+# Metric do DriftCollector trong API phát ra; nó chỉ ĐỌC drift/latest.json trên S3 chứ
+# không tự tính drift. Mọi pod đọc cùng một file nên giá trị là toàn cục — dùng max()
+# để gộp replica thay vì vẽ chồng nhiều đường giống hệt nhau.
+#
+# Tách khỏi dashboard API vì hai thứ trả lời hai câu khác nhau: dashboard kia hỏi
+# "dịch vụ có khoẻ không", dashboard này hỏi "dữ liệu còn giống lúc train không".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-housing-drift
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  housing-drift.json: |
+      {
+        "uid": "housing-mlops-drift",
+        "title": "Housing MLOps — Data Drift",
+        "tags": [
+          "housing",
+          "mlops",
+          "T11",
+          "drift"
+        ],
+        "timezone": "browser",
+        "schemaVersion": 39,
+        "version": 1,
+        "refresh": "1m",
+        "time": {
+          "from": "now-7d",
+          "to": "now"
+        },
+        "templating": {
+          "list": [
+            {
+              "name": "DS_PROMETHEUS",
+              "type": "datasource",
+              "query": "prometheus",
+              "current": {},
+              "hide": 0,
+              "label": "Datasource"
+            }
+          ]
+        },
+        "panels": [
+          {
+            "type": "stat",
+            "title": "Trạng thái drift",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 0,
+              "w": 6,
+              "h": 5
+            },
+            "fieldConfig": {
+              "defaults": {
+                "mappings": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Không drift",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "CÓ DRIFT",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "colorMode": "background",
+              "graphMode": "none",
+              "textMode": "auto",
+              "text": {
+                "valueSize": 36
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max(housing_drift_detected)",
+                "refId": "A",
+                "instant": true
+              }
+            ]
+          },
+          {
+            "type": "stat",
+            "title": "Đo gần nhất cách đây",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 6,
+              "y": 0,
+              "w": 6,
+              "h": 5
+            },
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 2592000
+                    },
+                    {
+                      "color": "red",
+                      "value": 3888000
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "colorMode": "background",
+              "graphMode": "none",
+              "textMode": "auto",
+              "text": {
+                "valueSize": 28
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "time() - max(housing_drift_last_detection_timestamp_seconds)",
+                "refId": "A",
+                "instant": true
+              }
+            ]
+          },
+          {
+            "type": "stat",
+            "title": "Feature bị drift",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 0,
+              "w": 6,
+              "h": 5
+            },
+            "fieldConfig": {
+              "defaults": {
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "colorMode": "background",
+              "graphMode": "none",
+              "textMode": "auto",
+              "text": {
+                "valueSize": 36
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max(housing_drift_features_drifted)",
+                "refId": "A",
+                "instant": true
+              }
+            ]
+          },
+          {
+            "type": "stat",
+            "title": "PSI target (gia_ty)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 18,
+              "y": 0,
+              "w": 6,
+              "h": 5
+            },
+            "fieldConfig": {
+              "defaults": {
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.1
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.2
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "colorMode": "background",
+              "graphMode": "none",
+              "textMode": "auto",
+              "text": {
+                "valueSize": 36
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max(housing_target_drift_psi)",
+                "refId": "A",
+                "instant": true
+              }
+            ]
+          },
+          {
+            "type": "timeseries",
+            "title": "PSI của target gia_ty theo thời gian (ngưỡng drift = 0,2)",
+            "description": "Đo trên dữ liệu thật: giá tăng 20% -> PSI 0,0755; 35% -> 0,1878; 50% -> 0,3540. Tức thị trường phải dịch ~35-40% mới chạm ngưỡng.",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 5,
+              "w": 12,
+              "h": 9
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "lineWidth": 2,
+                  "fillOpacity": 10,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.2
+                    }
+                  ]
+                },
+                "custom.thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "single"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max(housing_target_drift_psi)",
+                "refId": "A",
+                "legendFormat": "PSI gia_ty"
+              }
+            ]
+          },
+          {
+            "type": "bargauge",
+            "title": "PSI theo từng feature (ngưỡng 0,2)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 12,
+              "y": 5,
+              "w": 12,
+              "h": 9
+            },
+            "fieldConfig": {
+              "defaults": {
+                "min": 0,
+                "decimals": 4,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.1
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.2
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "displayMode": "gradient",
+              "orientation": "horizontal",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "showUnfilled": true
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max by (feature) (housing_drift_feature_psi)",
+                "refId": "A",
+                "legendFormat": "{{feature}}"
+              }
+            ]
+          },
+          {
+            "type": "timeseries",
+            "title": "Tỷ lệ feature bị drift (ngưỡng dataset drift = 0,3)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "gridPos": {
+              "x": 0,
+              "y": 14,
+              "w": 24,
+              "h": 7
+            },
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percentunit",
+                "min": 0,
+                "max": 1,
+                "custom": {
+                  "drawStyle": "line",
+                  "lineWidth": 2,
+                  "fillOpacity": 10,
+                  "spanNulls": true
+                },
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.3
+                    }
+                  ]
+                },
+                "custom.thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "overrides": []
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": {
+                "mode": "single"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${DS_PROMETHEUS}"
+                },
+                "expr": "max(housing_drifted_features_ratio)",
+                "refId": "A",
+                "legendFormat": "tỷ lệ feature drift"
+              }
+            ]
+          }
+        ]
+      }

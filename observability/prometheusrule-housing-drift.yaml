@@ -1,0 +1,57 @@
+# Alert cho Data Drift (T11).
+#
+# Metric do DriftCollector trong API phát ra; nó chỉ ĐỌC drift/latest.json trên S3,
+# không tự tính drift. Vì mọi pod đọc cùng một file nên giá trị là toàn cục — dùng
+# max() để gộp replica, nếu không alert sẽ bắn một bản cho mỗi pod.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: housing-drift
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: housing-mlops
+spec:
+  groups:
+    - name: housing-drift.rules
+      rules:
+        # Gộp sẵn một lần để alert và dashboard cùng một định nghĩa.
+        - record: housing:drift_detected
+          expr: max(housing_drift_detected)
+        - record: housing:drift_last_detection_age_seconds
+          expr: |
+            time() - max(housing_drift_last_detection_timestamp_seconds)
+
+        # --- Cảnh báo
+        # `for: 30m` chứ không phải vài phút: drift là kết luận về DỮ LIỆU, nó chỉ đổi
+        # sau mỗi lần crawl + preprocess, nên không có gì phải phản ứng trong 5 phút.
+        # Khoảng chờ này cũng đủ để bỏ qua lúc pod vừa khởi động chưa đọc được S3.
+        - alert: HousingDataDriftDetected
+          expr: housing:drift_detected == 1
+          for: 30m
+          labels: {severity: warning, component: housing-drift}
+          annotations:
+            summary: "Dataset đã lệch so với bản model đang serving"
+            description: >-
+              PSI vượt ngưỡng trên target hoặc đủ tỉ lệ feature. CT sẽ tự retrain ở lần
+              chạy theo lịch ngày nếu dataset thật sự mới hơn bản model đã train; alert
+              này để người biết chứ không phải để thao tác tay.
+
+        # Alert QUAN TRỌNG HƠN cái trên: nó bắt việc GIÁM SÁT đã chết.
+        # Không đo drift suốt 45 ngày nghĩa là hoặc không ai crawl + preprocess nữa,
+        # hoặc API không đọc được S3. Cả hai đều làm mọi metric drift phía trên thành
+        # vô nghĩa mà không có dấu hiệu nào khác.
+        #
+        # Điều kiện `> 0` là bắt buộc: khi chưa từng đọc được tín hiệu nào thì metric
+        # bằng 0, và `time() - 0` ra ~57 năm — alert sẽ bắn ngay trên một cụm mới dựng.
+        - alert: HousingDriftSignalStale
+          expr: |
+            max(housing_drift_last_detection_timestamp_seconds) > 0
+            and
+            housing:drift_last_detection_age_seconds > 3888000
+          for: 1h
+          labels: {severity: warning, component: housing-drift}
+          annotations:
+            summary: "Chưa đo drift suốt hơn 45 ngày"
+            description: >-
+              Lần đo gần nhất cách đây {{ $value | humanizeDuration }}. Kiểm xem có còn
+              chạy crawl + preprocess không, và API có đọc được drift/latest.json không.
