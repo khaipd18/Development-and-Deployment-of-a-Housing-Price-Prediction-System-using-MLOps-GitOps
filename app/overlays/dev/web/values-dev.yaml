@@ -7,4 +7,4 @@ resources:
     cpu: 25m
     memory: 32Mi
 image:
-  tag: a598a684b88efe881ec60e7ed2bef7a8adb5a320
+  tag: b1bc07b76b3f4707b6da14613becac7c99f120b5
