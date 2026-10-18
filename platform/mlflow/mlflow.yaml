@@ -34,7 +34,7 @@ spec:
       serviceAccountName: mlflow
       containers:
         - name: mlflow
-          image: burakince/mlflow:2.16.2
+          image: burakince/mlflow:3.3.1
           command: ["mlflow"]
           args:
             - "server"
