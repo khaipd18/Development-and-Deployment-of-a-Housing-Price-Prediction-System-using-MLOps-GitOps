@@ -61,9 +61,13 @@ spec:
             httpGet: { path: /health, port: 5000 }
             initialDelaySeconds: 40
             periodSeconds: 30
+          # 512Mi làm MLflow 3.x bị OOMKilled liên tục: pod "Running" nhưng
+          # exit 137 và restart 59 lần trong 8 giờ trên cụm thật ngày 18/10/2026.
+          # Lỗi này chưa từng lộ vì tag ảnh cũ không tồn tại nên pod chưa bao giờ
+          # chạy tới đây. MLflow 3.x nặng hơn 2.x đáng kể.
           resources:
-            requests: { cpu: "100m", memory: "256Mi" }
-            limits: { cpu: "500m", memory: "512Mi" }
+            requests: { cpu: "100m", memory: "512Mi" }
+            limits: { cpu: "500m", memory: "1Gi" }
 ---
 apiVersion: v1
 kind: Service

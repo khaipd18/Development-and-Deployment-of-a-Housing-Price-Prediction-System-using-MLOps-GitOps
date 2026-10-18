@@ -103,6 +103,21 @@ spec:
         # Jobs khởi tạo (migrate schema + tạo user) — bật mặc định
         migrateDatabaseJob:
           enabled: true
+        # Triggerer mặc định xin một PVC cho log và PVC đó KHÔNG BAO GIỜ bind được:
+        # cụm chỉ cài add-on coredns/kube-proxy/vpc-cni, không có aws-ebs-csi-driver,
+        # mà StorageClass `gp2` mặc định lại trỏ vào provisioner in-tree
+        # kubernetes.io/aws-ebs. Kết quả: pod Pending vĩnh viễn với
+        #   "pod has unbound immediate PersistentVolumeClaims"
+        # (đã treo 8 giờ trên cụm thật 18/10/2026).
+        #
+        # Chọn TẮT persistence thay vì cài thêm EBS CSI driver, cho nhất quán với Loki:
+        # cụm là bật-demo-rồi-destroy, emptyDir không tạo EBS nên không có volume nào
+        # sống sót sau destroy để rò rỉ chi phí. Log vẫn về Loki qua Alloy.
+        # Nếu sau này cần PVC thật thì phải thêm add-on aws-ebs-csi-driver kèm IAM
+        # riêng: https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html
+        logs:
+          persistence:
+            enabled: false
         # KHÔNG đặt `createUserJob.enabled`: chart 1.15.0 không có khoá đó và
         # ArgoCD từ chối toàn bộ Application với
         #   values don't meet the specifications of the schema(s) ...
