@@ -1,0 +1,62 @@
+# Unit test PromQL cho prometheusrule-housing-drift.yaml.
+#
+# Khoá lại: nhiều pod cùng phát một giá trị thì alert phải ra ĐÚNG MỘT bản, không
+# phải một bản mỗi pod; và `for: 30m` phải được tôn trọng.
+#
+# KHÔNG khoá được ở đây: điều kiện `> 0` trong HousingDriftSignalStale. Đồng hồ `time()`
+# của promtool bắt đầu từ 0 nên ở eval_time 90m nó chỉ bằng 5400; `time() - 0` ra 5400,
+# không vượt 3888000, nên bỏ guard đi test vẫn xanh. Ngoài đời `time()` là ~1,79 tỷ nên
+# `time() - 0` vượt ngưỡng ngay và alert bắn oan trên cụm mới dựng. Đã thử bỏ guard và
+# xác nhận test KHÔNG bắt được — giữ guard dựa trên lập luận đó, và kiểm bằng cách
+# query thẳng trên cụm thật (xem docs/eks-data-platform.md).
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # 1) Cụm mới: chưa có tín hiệu nào, mọi metric = 0. Không được bắn gì.
+  - interval: 1m
+    input_series:
+      - series: 'housing_drift_detected{namespace="housing-prod",pod="api-1"}'
+        values: '0+0x120'
+      - series: 'housing_drift_last_detection_timestamp_seconds{namespace="housing-prod",pod="api-1"}'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: HousingDataDriftDetected
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: HousingDriftSignalStale
+        exp_alerts: []
+
+  # 2) Có drift thật, hai pod cùng báo. Phải ra ĐÚNG MỘT alert, không phải hai.
+  - interval: 1m
+    input_series:
+      - series: 'housing_drift_detected{namespace="housing-prod",pod="api-1"}'
+        values: '1+0x120'
+      - series: 'housing_drift_detected{namespace="housing-prod",pod="api-2"}'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 10m          # chưa đủ for: 30m
+        alertname: HousingDataDriftDetected
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: HousingDataDriftDetected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: housing-drift
+            exp_annotations:
+              summary: "Dataset đã lệch so với bản model đang serving"
+              description: "PSI vượt ngưỡng trên target hoặc đủ tỉ lệ feature. CT sẽ tự retrain ở lần chạy theo lịch ngày nếu dataset thật sự mới hơn bản model đã train; alert này để người biết chứ không phải để thao tác tay."
+
+  # 3) Không drift -> im lặng.
+  - interval: 1m
+    input_series:
+      - series: 'housing_drift_detected{namespace="housing-prod",pod="api-1"}'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: HousingDataDriftDetected
+        exp_alerts: []
