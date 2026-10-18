@@ -29,6 +29,14 @@ service:
 
 env:
   PORT: "8000"
+  # Cờ bật S3 của pipeline. API chỉ ĐỌC: nó cần đọc drift/latest.json để phát các
+  # metric housing_drift_* ra /metrics. Thiếu cờ này thì `doc_json_s3` trả None và
+  # MỌI metric drift bằng 0 vĩnh viễn — đã kiểm trên cụm thật ngày 18/10/2026:
+  # pod phát housing_drift_detected 0 và last_detection_timestamp 0 trong khi tín hiệu
+  # trên S3 là no_drift có timestamp thật. Dashboard và alert sẽ im lặng mà không ai
+  # biết là do thiếu cấu hình.
+  # Quyền: node role có AmazonS3ReadOnlyAccess nên pod đọc được, không cần IRSA riêng.
+  HCM_S3_PUSH: "1"
 
 resources:
   limits:
