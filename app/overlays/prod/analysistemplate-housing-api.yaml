@@ -51,6 +51,7 @@ spec:
             )
             /
             clamp_min(sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}"}[2m])), 1e-9)
+            or vector(0)
       successCondition: result[0] <= 0.05
 
     # ── Latency p95 CỦA RIÊNG ĐƯỜNG DỰ ĐOÁN ──────────────────────────────────
@@ -64,12 +65,22 @@ spec:
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+          # `or vector(0)` là BẮT BUỘC, và lý do đã được kiểm chứng trên cụm thật
+          # ngày 19/10/2026 chứ không phải phòng xa: khi cửa sổ 2 phút chưa có
+          # request /predict nào thì histogram_quantile không sinh chuỗi, query trả
+          # RỖNG, và `result[0]` vỡ với
+          #     reflect: slice index out of range
+          # Rollouts tính đó là một phép đo "Error". Lần test đầu đếm được 3 lần
+          # Error liên tiếp, trong khi consecutiveErrorLimit mặc định là 4 — tức
+          # thiếu một nhịp nữa là canary abort oan dù hệ thống hoàn toàn khoẻ.
+          #
+          # Đây đúng là bài học của T11 "chuỗi vắng mặt KHÁC 0", mà lần đó đã áp
+          # cho error ratio nhưng quên áp cho latency.
           query: |
             histogram_quantile(0.95,
               sum by (le) (
                 rate(http_request_duration_seconds_bucket{job="housing-api",namespace="{{args.namespace}}",handler="/predict"}[2m])
               )
             )
-      # `>= 0` bắt cả NaN: khi chưa có request /predict nào trong cửa sổ thì
-      # histogram_quantile trả NaN, và so sánh NaN <= 1 ra false -> abort oan.
-      successCondition: result[0] >= 0 && result[0] <= 1
+            or vector(0)
+      successCondition: result[0] <= 1
