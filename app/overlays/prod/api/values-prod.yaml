@@ -11,3 +11,31 @@ resources:
     memory: 512Mi
 image:
   tag: 0b9487fcbf9afbc91b8f2504235fb4b9bb83404f
+
+# HPA (T12). Mục tiêu là ĐO được hành vi auto-scaling dưới tải, nên ngưỡng CPU đặt
+# thấp (60%) để scale xảy ra trong khung thời gian của một lần load test thay vì
+# phải đẩy tải cực lớn.
+#
+# scaleTargetRef là Rollout chứ không phải Deployment: prod dùng Argo Rollouts, và
+# Rollout có đăng ký scale subresource nên HPA điều khiển được bình thường. Trỏ nhầm
+# vào Deployment thì HPA báo "no matches for kind" và đứng im — không có gì đỏ.
+autoscaling:
+  enabled: true
+  targetApiVersion: argoproj.io/v1alpha1
+  targetKind: Rollout
+  minReplicas: 3
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 60
+  behavior:
+    scaleUp:
+      # Mặc định của Kubernetes là ổn định 0 giây khi scale LÊN, giữ nguyên để phản
+      # ứng nhanh với tải — đây là thứ cần đo.
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      # Mặc định 300 giây. Giữ nguyên để tránh thrash khi tải dao động; cũng là con
+      # số cần nêu trong báo cáo khi giải thích vì sao pod không co lại ngay.
+      stabilizationWindowSeconds: 300

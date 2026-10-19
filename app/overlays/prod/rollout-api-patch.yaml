@@ -5,12 +5,26 @@ metadata:
 spec:
   strategy:
     canary:
+      # Phân tích chạy SONG SONG với canary từ bước đầu tiên, không phải chạy xen kẽ
+      # giữa các bước. Nghĩa là nó quan sát liên tục suốt quá trình nâng traffic và
+      # có thể abort ở bất kỳ thời điểm nào, kể cả trong lúc đang pause.
+      analysis:
+        templates:
+          - templateName: housing-api-canary
+        startingStep: 1          # bắt đầu đo sau khi đã có traffic thật vào canary
+        args:
+          - name: namespace
+            value: housing-prod
       steps:
-        # Bước 1: Cho 20% lượng người dùng truy cập vào bản mới
+        # Bước 1: 20% người dùng vào bản mới
         - setWeight: 20
-        # Bước 2: Tạm dừng 10 phút để theo dõi lỗi (500 Server Error)
+        # Bước 2: dừng 10 phút để tích luỹ đủ số đo. Trước T12 đây là lúc người ngồi
+        # nhìn 500 Server Error; nay AnalysisTemplate đo liên tục và tự abort nếu
+        # error ratio vượt 5% hoặc p95 của /predict vượt 1s — đúng hai ngưỡng mà
+        # alert T11 dùng.
         - pause: { duration: 10m }
-        # Bước 3: Nâng lên 50% traffic
+        # Bước 3: nâng lên 50%
         - setWeight: 50
-        # Bước 4: Chờ người quản trị vào ArgoCD bấm nút Promote để lên 100%
+        # Bước 4: chờ người quản trị bấm Promote để lên 100%. Giữ cổng thủ công này
+        # vì đây là đồ án demo: muốn trình bày được quyết định promote trước Hội đồng.
         - pause: {}

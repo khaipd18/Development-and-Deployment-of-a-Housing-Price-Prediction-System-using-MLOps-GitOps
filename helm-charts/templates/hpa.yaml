@@ -1,0 +1,31 @@
+{{- if .Values.autoscaling }}
+{{- if .Values.autoscaling.enabled }}
+# HPA cho workload (T12). scaleTargetRef trỏ vào Rollout ở prod và Deployment ở dev,
+# nên kind lấy từ values chứ không hardcode — Argo Rollouts đăng ký Rollout là
+# scale subresource nên HPA điều khiển được y như Deployment.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  scaleTargetRef:
+    apiVersion: {{ .Values.autoscaling.targetApiVersion | default "apps/v1" }}
+    kind: {{ .Values.autoscaling.targetKind | default "Deployment" }}
+    name: {{ .Release.Name }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  {{- with .Values.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
