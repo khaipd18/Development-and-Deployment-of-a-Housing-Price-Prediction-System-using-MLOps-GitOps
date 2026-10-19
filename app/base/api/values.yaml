@@ -47,6 +47,24 @@ resources:
     memory: 256Mi
 
 probes:
+  # Khởi động của API nặng: import xgboost/shap/sklearn, nạp model 7,6MB và dataset,
+  # rồi từ PR #35 còn làm ấm cache /explain/global trước khi phục vụ.
+  #
+  # Không có startupProbe thì liveness kiểm lần đầu ở giây 15 và chỉ cho 3 lần hỏng,
+  # tức pod bị GIẾT ở khoảng giây 55 nếu khởi động lâu hơn thế — hậu quả là crash loop,
+  # kiểu hỏng tệ nhất. Local đo được 2,4s, nhưng trên cụm pod bị giới hạn 1 CPU và
+  # phần SHAP chậm hơn ~5,7 lần (7,57s so với 1,33s), nên biên an toàn mỏng và phụ
+  # thuộc vào một ƯỚC LƯỢNG chứ không phải số đo.
+  #
+  # startupProbe gỡ bỏ hẳn việc phải ước lượng: kubelet KHÔNG chạy liveness và
+  # readiness cho tới khi probe này đạt. 30 lần x 3s cho tối đa 90 giây để khởi động,
+  # sau đó liveness mới tiếp quản với ngưỡng chặt như cũ.
+  startup:
+    httpGet:
+      path: /docs
+      port: 8000
+    periodSeconds: 3
+    failureThreshold: 30
   readiness:
     httpGet:
       path: /docs
