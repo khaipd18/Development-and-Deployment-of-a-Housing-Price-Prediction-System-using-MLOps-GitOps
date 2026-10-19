@@ -72,16 +72,20 @@ panels = [
     ),
     {
         "type": "timeseries",
-        "title": "PSI của target gia_ty theo thời gian (ngưỡng drift = 0,2)",
-        "description": ("Đo trên dữ liệu thật: giá tăng 20% -> PSI 0,0755; 35% -> 0,1878; "
-                        "50% -> 0,3540. Tức thị trường phải dịch ~35-40% mới chạm ngưỡng."),
+        "title": "PSI của target gia_ty — vàng 0,10 theo dõi · đỏ 0,20 kích hoạt CT",
+        "description": ("Ngưỡng CT là PSI >= 0,20 (chốt 19/10/2026). Dải 0,10-0,20 chỉ để "
+                        "theo dõi, KHÔNG kích hoạt CT. Đo trên dữ liệu thật: giá tăng 20% "
+                        "-> PSI 0,0755; 35% -> 0,1878; 50% -> 0,3540, tức thị trường phải "
+                        "dịch ~35-40% mới chạm ngưỡng — lý do có dải cảnh báo sớm."),
         "datasource": DS, "gridPos": {"x": 0, "y": 5, "w": 12, "h": 9},
         "fieldConfig": {"defaults": {
             "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10,
                        "showPoints": "auto", "spanNulls": True},
             "min": 0,
             "thresholds": {"mode": "absolute", "steps": [
-                {"color": "green", "value": None}, {"color": "red", "value": 0.2}]},
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 0.1},
+                {"color": "red", "value": 0.2}]},
             "custom.thresholdsStyle": {"mode": "line"},
         }, "overrides": []},
         "options": {"legend": {"displayMode": "list", "placement": "bottom"},
