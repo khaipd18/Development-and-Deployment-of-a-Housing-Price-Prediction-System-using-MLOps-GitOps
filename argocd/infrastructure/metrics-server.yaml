@@ -1,0 +1,39 @@
+# metrics-server — nguồn số liệu CPU/RAM cho HPA và `kubectl top` (T12).
+#
+# EKS KHÔNG cài sẵn metrics-server. Thiếu nó thì HPA đứng ở <unknown>/70% vĩnh viễn
+# và không bao giờ scale, còn `kubectl top` báo "Metrics API not available" — cả hai
+# đều trông như lỗi HPA chứ không ai nghĩ là thiếu một thành phần.
+#
+# Đây KHÔNG phải nguồn số liệu cho dashboard/alert: phần đó là Prometheus. Hai thứ
+# tồn tại song song và phục vụ hai mục đích khác nhau — metrics-server cho vòng điều
+# khiển của Kubernetes, Prometheus cho quan trắc và cho canary analysis.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # phải có TRƯỚC khi HPA của app được tạo
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/metrics-server/
+    chart: metrics-server
+    targetRevision: 3.12.2
+    helm:
+      releaseName: metrics-server
+      values: |
+        args:
+          # Node group dùng AMI mặc định của EKS với chứng chỉ kubelet tự ký, nên
+          # metrics-server không xác thực được nếu không bỏ qua. Đây là cấu hình
+          # tiêu chuẩn cho EKS, không phải nới lỏng bảo mật tuỳ tiện.
+          - --kubelet-insecure-tls
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits:   {cpu: 200m, memory: 256Mi}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]

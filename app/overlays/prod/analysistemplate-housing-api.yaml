@@ -1,0 +1,75 @@
+# AnalysisTemplate cho canary của housing-api (T12).
+#
+# Argo Rollouts chạy template này SONG SONG với canary. Mỗi lần đo, nếu biểu thức
+# không thoả `successCondition` thì tính là một lần hỏng; đủ `failureLimit` lần hỏng
+# thì Rollout tự abort và quay về bản stable — rollback dựa trên SỐ ĐO chứ không phải
+# người ngồi nhìn.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# VÌ SAO DÙNG housing:predict_latency_p95_5m CHỨ KHÔNG PHẢI p95 GỘP
+#
+# /explain/global chạy TreeSHAP nên chậm theo đúng bản chất của nó: đo trên cụm là
+# 5,5-7,6 giây lúc cache lạnh, trong khi /predict là 3,4ms. Nếu canary nhìn p95 gộp
+# mọi handler thì chỉ cần endpoint giải thích chiếm hơn ~5% lưu lượng là nó rollback
+# một bản HOÀN TOÀN TỐT. Recording rule tách riêng đường dự đoán đã có từ T11
+# (GitOps PR #8) chính là để dùng ở đây.
+#
+# NGƯỠNG PHẢI KHỚP ALERT T11, nếu không sẽ có nghịch lý: alert kêu mà canary vẫn cho
+# qua, hoặc canary abort trong khi dashboard báo mọi thứ bình thường.
+#   HousingApiHighErrorRate   : housing:api_error_ratio5m    > 0.05
+#   HousingApiHighLatencyP95  : housing:predict_latency_p95_5m > 1
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: housing-api-canary
+  namespace: housing-prod
+spec:
+  args:
+    - name: namespace
+      value: housing-prod
+
+  metrics:
+    # ── Tỷ lệ lỗi 5xx ────────────────────────────────────────────────────────
+    # `or ... * 0` là phần bắt buộc chứ không phải cho đẹp: khi KHÔNG có request 5xx
+    # nào thì tử số không sinh chuỗi, phép chia trả về rỗng, và Rollouts coi kết quả
+    # rỗng là một phép đo KHÔNG thành công. Nghĩa là thiếu nó thì canary abort đúng
+    # vào lúc hệ thống hoàn hảo. Cùng một cái bẫy đã gặp ở recording rule T11.
+    - name: error-ratio
+      interval: 1m
+      count: 5
+      # Cho qua 1 lần hỏng lẻ (nhiễu đo), hỏng 2 lần thì abort.
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+          query: |
+            (
+              sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}",status=~"5.."}[2m]))
+              or
+              sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}"}[2m])) * 0
+            )
+            /
+            clamp_min(sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}"}[2m])), 1e-9)
+      successCondition: result[0] <= 0.05
+
+    # ── Latency p95 CỦA RIÊNG ĐƯỜNG DỰ ĐOÁN ──────────────────────────────────
+    # Lọc handler="/predict" ngay trong query thay vì dùng recording rule, vì
+    # recording rule gộp theo namespace nên không tách được canary với stable.
+    # Ngưỡng 1s giữ y như HousingApiHighLatencyP95.
+    - name: predict-latency-p95
+      interval: 1m
+      count: 5
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{job="housing-api",namespace="{{args.namespace}}",handler="/predict"}[2m])
+              )
+            )
+      # `>= 0` bắt cả NaN: khi chưa có request /predict nào trong cửa sổ thì
+      # histogram_quantile trả NaN, và so sánh NaN <= 1 ra false -> abort oan.
+      successCondition: result[0] >= 0 && result[0] <= 1

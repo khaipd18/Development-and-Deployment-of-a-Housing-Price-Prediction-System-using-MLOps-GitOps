@@ -3,6 +3,9 @@ kind: Kustomization
 
 resources:
   - ../../base
+  # AnalysisTemplate cho canary (T12). Rollout tham chiếu theo TÊN nên template phải
+  # tồn tại trong cùng namespace trước khi canary chạy, nếu không Rollout degraded.
+  - analysistemplate-housing-api.yaml
 
 helmGlobals:
   chartHome: ../../../
