@@ -65,22 +65,36 @@ spec:
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
-          # `or vector(0)` là BẮT BUỘC, và lý do đã được kiểm chứng trên cụm thật
-          # ngày 19/10/2026 chứ không phải phòng xa: khi cửa sổ 2 phút chưa có
-          # request /predict nào thì histogram_quantile không sinh chuỗi, query trả
-          # RỖNG, và `result[0]` vỡ với
-          #     reflect: slice index out of range
-          # Rollouts tính đó là một phép đo "Error". Lần test đầu đếm được 3 lần
-          # Error liên tiếp, trong khi consecutiveErrorLimit mặc định là 4 — tức
-          # thiếu một nhịp nữa là canary abort oan dù hệ thống hoàn toàn khoẻ.
+          # Query này phải chống ĐỦ HAI trạng thái "không có tải", và cả hai đều đã
+          # đo được trên cụm thật ngày 19-20/10/2026 chứ không phải phòng xa:
           #
-          # Đây đúng là bài học của T11 "chuỗi vắng mặt KHÁC 0", mà lần đó đã áp
-          # cho error ratio nhưng quên áp cho latency.
+          # 1. CHƯA TỪNG có request /predict -> không có chuỗi nào, query trả RỖNG,
+          #    `result[0]` vỡ với "reflect: slice index out of range". Rollouts tính
+          #    là phép đo "Error"; lần test đầu đếm được 3 Error liên tiếp trong khi
+          #    consecutiveErrorLimit mặc định là 4 — thiếu một nhịp là abort oan.
+          #    -> `or vector(0)` xử lý ca này.
+          #
+          # 2. ĐÃ TỪNG có request nhưng 2 phút gần nhất thì không: chuỗi bucket VẪN
+          #    tồn tại, rate của mọi bucket bằng 0, và histogram_quantile(0.95, toàn
+          #    số 0) = NaN. Vì chuỗi tồn tại nên `or vector(0)` KHÔNG kích hoạt,
+          #    result[0] = NaN, và `NaN <= 1` là FALSE -> phép đo "Failed". Với
+          #    failureLimit 1 thì chỉ cần 2 nhịp vắng tải là canary abort oan — tệ
+          #    hơn ca 1 vì ngưỡng thấp hơn.
+          #    -> `>= 0` xử lý ca này: trong Prometheus mọi so sánh với NaN đều sai,
+          #       nên mẫu NaN bị LỌC BỎ, biểu thức thành rỗng, rồi `or vector(0)`
+          #       mới có chỗ chen vào. Giá trị thật thì luôn >= 0 nên đi qua nguyên vẹn.
+          #
+          # Đo đối chứng trên Prometheus của cụm lúc không có tải:
+          #   chỉ `or vector(0)`      -> 1 chuỗi, giá trị NaN
+          #   `>= 0` rồi `or vector(0)` -> 1 chuỗi, giá trị 0
           query: |
-            histogram_quantile(0.95,
-              sum by (le) (
-                rate(http_request_duration_seconds_bucket{job="housing-api",namespace="{{args.namespace}}",handler="/predict"}[2m])
+            (
+              histogram_quantile(0.95,
+                sum by (le) (
+                  rate(http_request_duration_seconds_bucket{job="housing-api",namespace="{{args.namespace}}",handler="/predict"}[2m])
+                )
               )
+              >= 0
             )
             or vector(0)
       successCondition: result[0] <= 1
