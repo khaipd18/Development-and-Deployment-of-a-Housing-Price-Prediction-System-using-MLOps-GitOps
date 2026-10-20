@@ -1,0 +1,193 @@
+# Unit test PromQL cho query của AnalysisTemplate canary
+# (app/overlays/prod/analysistemplate-housing-api.yaml), chạy bằng `promtool test rules`.
+#
+# VÌ SAO CÓ FILE NÀY. Query của canary là thứ quyết định một bản deploy được promote
+# hay bị rollback, nhưng nó nằm trong AnalysisTemplate nên kubeconform không nhìn vào,
+# và chỉ lộ sai khi đã có cụm chạy. Hai lỗi thật đã xảy ra đúng theo kiểu đó: query
+# trả RỖNG làm `result[0]` vỡ, rồi query trả NaN làm `NaN <= 1` thành false. Cả hai
+# đều khiến canary abort oan trên một hệ thống hoàn toàn khoẻ.
+#
+# Query ở đây PHẢI trùng với query trong AnalysisTemplate (đã thay `{{args.namespace}}`
+# bằng `housing-prod`). Bước `validate.yml` tự so hai bên, nên sửa template mà quên
+# sửa test là CI đỏ.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1) CÓ TẢI, KHÔNG LỖI — cả hai metric phải cho đúng MỘT giá trị hợp lệ.
+  # ───────────────────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: co tai va khong loi
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="0.1"}'
+        values: '0+10x20'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="1"}'
+        values: '0+10x20'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="+Inf"}'
+        values: '0+10x20'
+      - series: 'http_requests_total{job="housing-api",namespace="housing-prod",handler="/predict",status="200"}'
+        values: '0+10x20'
+    promql_expr_test:
+      - expr: '( max(housing:predict_latency_p95_5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 15m
+        exp_samples:
+          - labels: '{}'
+            value: 0.095
+      - expr: '( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 15m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      # Đúng MỘT sample — nếu trả về nhiều thì `result[0]` phụ thuộc thứ tự.
+      - expr: 'count(( max(housing:predict_latency_p95_5m{namespace="housing-prod"}) >= 0 ) or vector(0))'
+        eval_time: 15m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2) COUNTER ĐỨNG YÊN — pod vẫn sống, metric vẫn bị scrape, chỉ là không có
+  #    request mới. Đây là ca sinh ra NaN và là ca đã làm canary hỏng thật.
+  # ───────────────────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: counter dung yen thi khong duoc ra NaN
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="0.1"}'
+        values: '0+10x10 100x10'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="1"}'
+        values: '0+10x10 100x10'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="+Inf"}'
+        values: '0+10x10 100x10'
+      - series: 'http_requests_total{job="housing-api",namespace="housing-prod",handler="/predict",status="200"}'
+        values: '0+10x10 100x10'
+    promql_expr_test:
+      # Chuỗi recording rule VẪN tồn tại...
+      - expr: 'count(housing:predict_latency_p95_5m{namespace="housing-prod"})'
+        eval_time: 19m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      # ...nhưng không thoả `>= 0`, tức giá trị là NaN. Hai assert này cùng nhau là
+      # cách duy nhất khẳng định NaN, vì promtool không cho ghi NaN vào exp_samples.
+      - expr: 'housing:predict_latency_p95_5m{namespace="housing-prod"} >= 0'
+        eval_time: 19m
+        exp_samples: []
+      # HỒI QUY 1: dạng cũ chỉ có `or vector(0)` trả về HAI chuỗi, vì recording rule
+      # mang nhãn `namespace` còn `vector(0)` không mang nhãn nào nên `or` không thay
+      # thế được. `result[0]` khi đó phụ thuộc thứ tự Prometheus trả về.
+      - expr: 'count(housing:predict_latency_p95_5m{namespace="housing-prod"} or vector(0))'
+        eval_time: 19m
+        exp_samples:
+          - labels: '{}'
+            value: 2
+      # HỒI QUY 2: thiếu `>= 0` thì `successCondition result[0] <= 1` không thoả.
+      - expr: '(housing:predict_latency_p95_5m{namespace="housing-prod"}) <= 1'
+        eval_time: 19m
+        exp_samples: []
+      # Dạng ĐÚNG: một chuỗi, giá trị 0, và thoả successCondition.
+      - expr: '( max(housing:predict_latency_p95_5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 19m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: '( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 19m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3) CHƯA TỪNG CÓ CHUỖI NÀO — ca làm `result[0]` vỡ với
+  #    "reflect: slice index out of range".
+  # ───────────────────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: chua tung co chuoi nao
+    input_series:
+      # Một chuỗi không liên quan, chỉ để test có dữ liệu đầu vào.
+      - series: 'up{job="housing-api",namespace="housing-prod"}'
+        values: '1x10'
+    promql_expr_test:
+      - expr: 'count(housing:predict_latency_p95_5m{namespace="housing-prod"})'
+        eval_time: 8m
+        exp_samples: []
+      - expr: '( max(housing:predict_latency_p95_5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: '( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4) CANARY HỎNG NHẸ (tỷ lệ lỗi thật 0,08) — ca quyết định `count` phải là 7.
+  #    Cửa sổ 5m cần đủ 5 phút mới bão hoà, nên nó chỉ vượt ngưỡng 0,05 từ phép đo
+  #    thứ 4. Với failureLimit 1 thì cần hai lần hỏng, tức phép đo thứ 5 — nếu
+  #    `count` vẫn là 5 thì vừa đủ sát, không còn biên cho nhiễu.
+  # ───────────────────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: canary hong nhe van phai bi bat
+    input_series:
+      - series: 'http_requests_total{job="housing-api",namespace="housing-prod",handler="/predict",status="200"}'
+        values: '0+10x10 100+9.2x14'
+      - series: 'http_requests_total{job="housing-api",namespace="housing-prod",handler="/predict",status="500"}'
+        values: '0+0x10 0+0.8x14'
+    promql_expr_test:
+      # Phép đo thứ 3 sau khi canary lên: CHƯA vượt ngưỡng (cửa sổ chưa bão hoà).
+      - expr: '(( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)) > bool 0.05'
+        eval_time: 13m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      # Phép đo thứ 4: vượt.
+      - expr: '(( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)) > bool 0.05'
+        eval_time: 14m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      # Phép đo thứ 5: vẫn vượt -> đủ hai lần hỏng -> abort.
+      - expr: '(( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)) > bool 0.05'
+        eval_time: 15m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      # Và tới phép đo thứ 7 thì cửa sổ đã bão hoà đúng tỷ lệ thật 0,08. Kẹp bằng
+      # hai bất đẳng thức chứ không so bằng, vì phép chia ra 0,08000000000000003.
+      - expr: '(( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)) > bool 0.0799'
+        eval_time: 17m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: '(( max(housing:api_error_ratio5m{namespace="housing-prod"}) >= 0 ) or vector(0)) < bool 0.0801'
+        eval_time: 17m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 5) LATENCY THẬT CAO — phải vượt ngưỡng 1 giây, nếu không canary sẽ promote một
+  #    bản chậm. Đây là chiều ngược của ca số 2: ở đó ta chống abort oan, ở đây ta
+  #    chống việc guard `or vector(0)` che mất lỗi thật.
+  # ───────────────────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: latency cao phai vuot nguong
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="0.1"}'
+        values: '0+0x20'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="1"}'
+        values: '0+0x20'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="5"}'
+        values: '0+10x20'
+      - series: 'http_request_duration_seconds_bucket{job="housing-api",namespace="housing-prod",handler="/predict",le="+Inf"}'
+        values: '0+10x20'
+    promql_expr_test:
+      - expr: '(( max(housing:predict_latency_p95_5m{namespace="housing-prod"}) >= 0 ) or vector(0)) > bool 1'
+        eval_time: 15m
+        exp_samples:
+          - labels: '{}'
+            value: 1
