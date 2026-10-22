@@ -88,6 +88,48 @@ jobs:
             promtool test rules "$t"
           done
 
+      # Query của canary quyết định promote hay rollback, nhưng nó nằm trong
+      # AnalysisTemplate nên kubeconform không nhìn vào và promtool cũng không tự
+      # tìm thấy. Bước này buộc mỗi query trong template phải có mặt trong file
+      # test, nên sửa template mà quên sửa test là CI đỏ — chứ không phải trông vào
+      # việc người sửa còn nhớ.
+      - name: Query canary trong AnalysisTemplate phải được test
+        run: |
+          python3 - <<'EOS'
+          import glob, re, sys, yaml
+
+          def gon(q):
+              return re.sub(r"\s+", " ", q).strip()
+
+          # Mọi expr xuất hiện trong các file test
+          da_test = set()
+          for f in glob.glob("observability/tests/*_test.yaml"):
+              d = yaml.safe_load(open(f)) or {}
+              for t in d.get("tests", []):
+                  for c in t.get("promql_expr_test", []):
+                      da_test.add(gon(c["expr"]))
+
+          thieu, tong = [], 0
+          for f in glob.glob("app/overlays/*/analysistemplate-*.yaml"):
+              d = yaml.safe_load(open(f))
+              args = {a["name"]: a.get("value", "") for a in d["spec"].get("args", [])}
+              for m in d["spec"]["metrics"]:
+                  q = m["provider"]["prometheus"]["query"]
+                  for k, v in args.items():
+                      q = q.replace("{{args.%s}}" % k, v)
+                  tong += 1
+                  if gon(q) not in da_test:
+                      thieu.append((f, m["name"], gon(q)))
+
+          assert tong, "không tìm thấy query canary nào — đường dẫn đã đổi?"
+          for f, n, q in thieu:
+              print(f"  THIẾU TEST  {f}  metric={n}")
+              print(f"              {q}")
+          if thieu:
+              sys.exit(f"{len(thieu)}/{tong} query canary chưa có test tương ứng")
+          print(f"  {tong}/{tong} query canary đều có test")
+          EOS
+
       # Dashboard nhúng JSON trong YAML — YAML hợp lệ không có nghĩa JSON bên trong
       # hợp lệ. Panel hỏng chỉ hiện ra khi mở Grafana, nên parse luôn ở đây.
       - name: Kiểm JSON dashboard nhúng trong ConfigMap

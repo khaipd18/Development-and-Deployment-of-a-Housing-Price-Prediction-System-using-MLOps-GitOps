@@ -6,18 +6,48 @@
 # người ngồi nhìn.
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# VÌ SAO DÙNG housing:predict_latency_p95_5m CHỨ KHÔNG PHẢI p95 GỘP
+# DÙNG ĐÚNG RECORDING RULE MÀ ALERT T11 DÙNG
 #
-# /explain/global chạy TreeSHAP nên chậm theo đúng bản chất của nó: đo trên cụm là
-# 5,5-7,6 giây lúc cache lạnh, trong khi /predict là 3,4ms. Nếu canary nhìn p95 gộp
-# mọi handler thì chỉ cần endpoint giải thích chiếm hơn ~5% lưu lượng là nó rollback
-# một bản HOÀN TOÀN TỐT. Recording rule tách riêng đường dự đoán đã có từ T11
-# (GitOps PR #8) chính là để dùng ở đây.
+# Bản đầu viết query inline với cửa sổ [2m]. Ân review và chỉ ra: alert T11 dùng
+# recording rule cửa sổ 5m, nên hai bên **cùng ngưỡng mà có thể ra quyết định khác
+# nhau** — đúng cái nghịch lý mà chính comment này cảnh báo: alert kêu mà canary vẫn
+# cho qua, hoặc canary abort trong khi dashboard báo bình thường.
 #
-# NGƯỠNG PHẢI KHỚP ALERT T11, nếu không sẽ có nghịch lý: alert kêu mà canary vẫn cho
-# qua, hoặc canary abort trong khi dashboard báo mọi thứ bình thường.
-#   HousingApiHighErrorRate   : housing:api_error_ratio5m    > 0.05
-#   HousingApiHighLatencyP95  : housing:predict_latency_p95_5m > 1
+# Lý do ban đầu mình tránh recording rule là "nó gộp theo namespace nên không tách
+# được canary với stable". Lý do đó KHÔNG CÒN GIÁ TRỊ: đo trên cụm thật cho thấy
+# metric không mang nhãn `rollouts-pod-template-hash`, nên query inline cũng gộp
+# toàn namespace y như vậy. Đổi sang recording rule không mất gì và được tính nhất
+# quán với alert.
+#
+#   HousingApiHighErrorRate   : housing:api_error_ratio5m       > 0.05
+#   HousingApiHighLatencyP95  : housing:predict_latency_p95_5m  > 1
+#
+# `housing:predict_latency_p95_5m` đã lọc `handler="/predict"` sẵn từ T11 (GitOps
+# PR #8). Việc lọc đó là bắt buộc chứ không phải cho gọn: `/explain/global` chạy
+# TreeSHAP nên đo được 5,5-7,6 giây lúc cache lạnh, trong khi `/predict` là 3,4ms.
+# Nếu canary nhìn p95 gộp mọi handler thì chỉ cần endpoint giải thích chiếm hơn ~5%
+# lưu lượng là nó rollback một bản HOÀN TOÀN TỐT.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# VÌ SAO count PHẢI LÀ 7 CHỨ KHÔNG PHẢI 5
+#
+# Cửa sổ 5m cần đúng 5 phút mới bão hoà: sau k phút canary, rate[5m] chỉ thấy k/5
+# phần lưu lượng hỏng. Đo bằng promtool với một ca hỏng NHẸ (tỷ lệ lỗi thật 0,08):
+#
+#   phút sau khi canary lên │ 5m (recording rule) │ 2m (inline cũ)
+#   ───────────────────────────────────────────────────────────────
+#     2                     │ 0,0214              │ 0,0417
+#     3                     │ 0,0431              │ 0,0800  ← vượt
+#     4                     │ 0,0650  ← vượt      │ 0,0800
+#
+# Với `failureLimit: 1` thì cần HAI lần hỏng mới abort. Cửa sổ 2m hỏng ở phút 3 và 4
+# nên `count: 5` là dư. Cửa sổ 5m chỉ hỏng ở phút 4 và 5 — vừa đủ, không còn biên cho
+# nhiễu, và một ca hỏng nhẹ hơn nữa sẽ THOÁT hoàn toàn.
+#
+# Tổng quát: với cửa sổ 5m, mọi tỷ lệ lỗi thật > 0,05 đều chắc chắn vượt ngưỡng từ
+# phép đo thứ 5 trở đi (lúc cửa sổ đã bão hoà), nên cần `count >= 6` để có hai lần
+# hỏng. Đặt 7 để còn một nhịp dự phòng. 7 phép đo × 1 phút vẫn nằm gọn trong
+# `pause: 10m` của bước 1, nên không làm canary chậm thêm.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
@@ -31,45 +61,70 @@ spec:
 
   metrics:
     # ── Tỷ lệ lỗi 5xx ────────────────────────────────────────────────────────
-    # `or ... * 0` là phần bắt buộc chứ không phải cho đẹp: khi KHÔNG có request 5xx
-    # nào thì tử số không sinh chuỗi, phép chia trả về rỗng, và Rollouts coi kết quả
-    # rỗng là một phép đo KHÔNG thành công. Nghĩa là thiếu nó thì canary abort đúng
-    # vào lúc hệ thống hoàn hảo. Cùng một cái bẫy đã gặp ở recording rule T11.
     - name: error-ratio
       interval: 1m
-      count: 5
+      count: 7
       # Cho qua 1 lần hỏng lẻ (nhiễu đo), hỏng 2 lần thì abort.
       failureLimit: 1
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+          # `max(...)` và `>= 0` đều là phần BẮT BUỘC, không phải cho đẹp — xem
+          # giải thích đầy đủ ở metric latency bên dưới, cùng một cơ chế.
+          # Với riêng error ratio, `>= 0` là phòng xa (recording rule đã có
+          # `clamp_min` nên không sinh NaN), còn `max(...)` thì load-bearing.
           query: |
             (
-              sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}",status=~"5.."}[2m]))
-              or
-              sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}"}[2m])) * 0
+              max(housing:api_error_ratio5m{namespace="{{args.namespace}}"}) >= 0
             )
-            /
-            clamp_min(sum(rate(http_requests_total{job="housing-api",namespace="{{args.namespace}}"}[2m])), 1e-9)
+            or vector(0)
       successCondition: result[0] <= 0.05
 
     # ── Latency p95 CỦA RIÊNG ĐƯỜNG DỰ ĐOÁN ──────────────────────────────────
-    # Lọc handler="/predict" ngay trong query thay vì dùng recording rule, vì
-    # recording rule gộp theo namespace nên không tách được canary với stable.
-    # Ngưỡng 1s giữ y như HousingApiHighLatencyP95.
     - name: predict-latency-p95
       interval: 1m
-      count: 5
+      count: 7
       failureLimit: 1
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+          # Query phải chống ĐỦ BA trạng thái, cả ba đều đã đo được chứ không phải
+          # phòng xa. Hai cái đầu đo trên cụm thật 19-20/10/2026, cái thứ ba đo bằng
+          # promtool khi chuyển sang recording rule.
+          #
+          # 1. CHƯA TỪNG có request -> không có chuỗi nào, query trả RỖNG, `result[0]`
+          #    vỡ với "reflect: slice index out of range". Rollouts tính là phép đo
+          #    "Error"; lần test đầu đếm được 3 Error liên tiếp trong khi
+          #    consecutiveErrorLimit mặc định là 4 — thiếu một nhịp là abort oan.
+          #    -> `or vector(0)` xử lý ca này.
+          #
+          # 2. ĐÃ TỪNG có request nhưng 5 phút gần nhất thì không: pod vẫn sống,
+          #    metric vẫn bị scrape, nhưng counter ĐỨNG YÊN nên rate của mọi bucket
+          #    bằng 0, và histogram_quantile(0.95, toàn số 0) = NaN. Vì chuỗi VẪN
+          #    tồn tại nên `or vector(0)` không kích hoạt, result[0] = NaN, và
+          #    `NaN <= 1` là FALSE -> phép đo "Failed". Với failureLimit 1 thì 2 nhịp
+          #    vắng tải là abort oan — tệ hơn ca 1 vì ngưỡng thấp hơn.
+          #    -> `>= 0` xử lý ca này: trong Prometheus mọi so sánh với NaN đều sai,
+          #       nên mẫu NaN bị LỌC BỎ, biểu thức thành rỗng, rồi `or vector(0)` mới
+          #       có chỗ chen vào. Giá trị thật luôn >= 0 nên đi qua nguyên vẹn.
+          #
+          # 3. Recording rule mang nhãn `namespace`, còn `vector(0)` KHÔNG mang nhãn
+          #    nào. `or` chỉ thay thế khi hai bên cùng tập nhãn, nên
+          #    `rule{namespace=...} or vector(0)` trả về HAI chuỗi — chuỗi NaN và
+          #    chuỗi 0 — và `result[0]` thành phụ thuộc thứ tự Prometheus trả về.
+          #    Bẫy này KHÔNG có ở query inline cũ, vì `sum by (le)` rồi
+          #    histogram_quantile cho ra tập nhãn rỗng, khớp đúng `vector(0)`.
+          #    -> `max(...)` xử lý ca này: nó thu tập nhãn về rỗng nên `or` hoạt động
+          #       như mong đợi. Ở đây `max` chỉ là công cụ bỏ nhãn — mỗi namespace
+          #       vốn chỉ có một chuỗi.
+          #
+          # Đo bằng promtool, lúc counter đứng yên:
+          #   rule or vector(0)              -> 2 chuỗi (NaN và 0)
+          #   (max(rule) >= 0) or vector(0)  -> 1 chuỗi, giá trị 0
+          # và lúc có tải: -> 1 chuỗi, giá trị 0,095.
           query: |
-            histogram_quantile(0.95,
-              sum by (le) (
-                rate(http_request_duration_seconds_bucket{job="housing-api",namespace="{{args.namespace}}",handler="/predict"}[2m])
-              )
+            (
+              max(housing:predict_latency_p95_5m{namespace="{{args.namespace}}"}) >= 0
             )
-      # `>= 0` bắt cả NaN: khi chưa có request /predict nào trong cửa sổ thì
-      # histogram_quantile trả NaN, và so sánh NaN <= 1 ra false -> abort oan.
-      successCondition: result[0] >= 0 && result[0] <= 1
+            or vector(0)
+      successCondition: result[0] <= 1
