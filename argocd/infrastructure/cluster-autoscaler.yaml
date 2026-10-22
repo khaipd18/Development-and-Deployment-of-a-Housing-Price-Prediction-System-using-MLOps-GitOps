@@ -7,7 +7,24 @@
 #
 # PHIÊN BẢN PHẢI KHỚP PHIÊN BẢN CỤM — tài liệu AWS nói rõ cross-version không được
 # kiểm thử và không được hỗ trợ (https://docs.aws.amazon.com/eks/latest/best-practices/cas.html).
-# Cụm là EKS 1.35 nên ảnh ghim v1.35.0; đã kiểm tag tồn tại bằng `docker manifest inspect`.
+#
+# KHỚP PHIÊN BẢN NGHĨA LÀ KHỚP CẢ CHART, KHÔNG CHỈ ẢNH. Lần đầu triển khai (19/10/2026)
+# chart ghim 9.46.6 — appVersion 1.32.0 — rồi ghi đè image.tag lên v1.35.0 cho khớp cụm.
+# Hậu quả: binary 1.35 chạy với ClusterRole thời 1.32. CA 1.35 bật DRA (Dynamic Resource
+# Allocation) và cờ --enable-dynamic-resource-allocation bị KHOÁ CỨNG ở true, nên nó phải
+# list/watch được resourceslices, deviceclasses, resourceclaims trong nhóm resource.k8s.io.
+# ClusterRole 1.32 không có các quyền đó, nên CA dừng vĩnh viễn ở dòng
+#     main.go:288 Initializing resource informers, blocking until caches are synced
+# KHÔNG BAO GIỜ vào main loop. Nó vẫn Running 1/1, vẫn "Registering ASG ..." thành công,
+# vẫn không có một lỗi quyền AWS nào — nhưng 2 pod Pending suốt 10 phút trong load test
+# mà node vẫn là 3, và tuyệt đối không có event TriggeredScaleUp hay NotTriggerScaleUp.
+#
+# Vì vậy KHÔNG ghi đè image.tag nữa: để appVersion của chart quyết định ảnh, và chỉ cần
+# bảo đảm MỘT điều kiện duy nhất — appVersion của chart khớp minor version của cụm.
+# Chart 9.59.0 có appVersion 1.35.0 và ClusterRole đã có nhóm resource.k8s.io.
+#
+# Bài học kiểm thử: "pod Running, không có lỗi" KHÔNG chứng minh autoscaler hoạt động.
+# Chỉ có node tăng thật khi có pod Pending mới chứng minh được.
 #
 # Hai lựa chọn thay thế của AWS, ghi lại theo yêu cầu của kế hoạch:
 #   • EKS Auto Mode — AWS tự quản lý việc scale, DỰNG TRÊN Karpenter.
@@ -28,7 +45,7 @@ spec:
   source:
     repoURL: https://kubernetes.github.io/autoscaler
     chart: cluster-autoscaler
-    targetRevision: 9.46.6
+    targetRevision: 9.59.0
     helm:
       releaseName: cluster-autoscaler
       values: |
@@ -38,8 +55,6 @@ spec:
           # Autoscaler tự tìm ASG qua tag k8s.io/cluster-autoscaler/<tên cụm>.
           # Managed node group của EKS tự gắn tag này, không phải thêm tay.
           clusterName: housing-mlops-eks-cluster
-        image:
-          tag: v1.35.0
         rbac:
           serviceAccount:
             name: cluster-autoscaler
