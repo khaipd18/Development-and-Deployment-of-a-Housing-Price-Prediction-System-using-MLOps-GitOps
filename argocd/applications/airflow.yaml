@@ -92,6 +92,19 @@ spec:
           serviceAccount:
             create: false
             name: airflow
+          # TẮT persistence. Cụm này KHÔNG cài EBS CSI driver nên PVC của triggerer
+          # không bao giờ bind được: pod đứng Pending với
+          #   "0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims"
+          # và — chỗ này mới là vấn đề — Argo CD coi app là chưa healthy nên MỌI lần
+          # sync sau đó treo ở "waiting for healthy state of
+          # apps/StatefulSet/airflow-triggerer". Đo được ngày 24/10/2026: chính nó chặn
+          # bản sửa IRSA không vào được cụm.
+          #
+          # Triggerer chỉ cần cho deferrable operator; DAG hcm_ct dùng PythonOperator
+          # nên không cần. Giữ component cho đúng kiến trúc chart, bỏ đĩa bền.
+          # Muốn có đĩa bền thì phải cài addon aws-ebs-csi-driver kèm IRSA — chưa làm.
+          persistence:
+            enabled: false
 
         # Biến môi trường chung cho scheduler/worker/webserver
         env:
