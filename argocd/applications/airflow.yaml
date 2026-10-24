@@ -72,9 +72,16 @@ spec:
         # TỪ CHỐI AssumeRoleWithWebIdentity dù annotation có đúng ARN. Kiểm bằng
         # `aws iam get-role --role-name housing-mlops-airflow-irsa`.
         #
-        # Chọn cách này thay vì nới điều kiện IAM thành `airflow-*`: giữ được tính chất
-        # "role chỉ assume được bởi ĐÚNG MỘT service account", vốn là thứ làm IAM ở đây
-        # còn đáng gọi là least-privilege.
+        # ĐÂY LÀ MỘT ĐÁNH ĐỔI, KHÔNG PHẢI least-privilege. Ân hậu kiểm và chỉ ra chỗ
+        # comment cũ nói quá. Dùng chung một SA giữ được tính chất "role chỉ assume được
+        # bởi ĐÚNG MỘT service account", nhưng đồng thời GỘP QUYỀN của mọi component vào
+        # một danh tính: webserver và triggerer nay mang cùng quyền ghi S3 như scheduler
+        # và worker, dù chúng không cần. Tức đổi mức chi tiết của phân quyền để lấy điều
+        # kiện trust chặt, chứ không được cả hai.
+        #
+        # Lựa chọn còn lại: một IRSA role cho MỖI SA của chart (role per component), lúc
+        # đó mới nói được least-privilege theo từng component. Chưa làm — nó cần sửa
+        # Terraform để tạo nhiều role và nhiều trust policy.
         #
         # scheduler tạo SA; các component khác chỉ THAM CHIẾU (create: false) để Helm
         # không render trùng tài nguyên. Annotation chỉ cần ở chỗ tạo.
