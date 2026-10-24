@@ -50,12 +50,48 @@ spec:
           # postgresql+psycopg2://platform_admin:...@<rds>:5432/airflow
           metadataSecretName: airflow-metadata
 
-        # ServiceAccount + IRSA (tên role cố định -> hardcode)
-        serviceAccount:
-          create: true
-          name: airflow
-          annotations:
-            eks.amazonaws.com/role-arn: "arn:aws:iam::090885120487:role/housing-mlops-airflow-irsa"
+        # ServiceAccount + IRSA. PHẢI khai báo THEO TỪNG COMPONENT.
+        #
+        # Bản trước đặt khối này ở CẤP CAO NHẤT (`serviceAccount:` ngoài cùng). Chart
+        # airflow 1.15.0 KHÔNG có khoá đó — nó chỉ có `serviceAccount` bên trong từng
+        # component (`scheduler`, `workers`, `webserver`, `triggerer`, `statsd`,
+        # `createUserJob`, `migrateDatabaseJob`, ...). Helm bỏ qua khoá lạ mà KHÔNG
+        # cảnh báo, nên annotation IRSA chưa bao giờ được gắn, và không SA nào tên
+        # `airflow` được tạo — chỉ có `airflow-scheduler`, `airflow-triggerer`, ...
+        #
+        # Hậu quả đo được trên cụm 24/10/2026: pod rơi về NODE ROLE
+        # (housing-mlops-eks-cluster-node-role) nên mọi lần ghi S3 trả AccessDenied, và
+        # CT không đẩy được model nào lên bucket ARTIFACTS. Kiểm bằng
+        # `helm show values apache-airflow/airflow --version 1.15.0`: `serviceAccount`
+        # chỉ xuất hiện ở cấp component.
+        #
+        # TẤT CẢ component dùng CHUNG một SA tên `airflow`, không phải mỗi component
+        # một SA riêng. Lý do là trust policy của role IRSA do Terraform tạo khoá cứng
+        #   sub = system:serviceaccount:airflow:airflow
+        # nên nếu để chart tự đặt tên theo component (`airflow-scheduler`, ...) thì STS
+        # TỪ CHỐI AssumeRoleWithWebIdentity dù annotation có đúng ARN. Kiểm bằng
+        # `aws iam get-role --role-name housing-mlops-airflow-irsa`.
+        #
+        # Chọn cách này thay vì nới điều kiện IAM thành `airflow-*`: giữ được tính chất
+        # "role chỉ assume được bởi ĐÚNG MỘT service account", vốn là thứ làm IAM ở đây
+        # còn đáng gọi là least-privilege.
+        #
+        # scheduler tạo SA; các component khác chỉ THAM CHIẾU (create: false) để Helm
+        # không render trùng tài nguyên. Annotation chỉ cần ở chỗ tạo.
+        scheduler:
+          serviceAccount:
+            create: true
+            name: airflow
+            annotations:
+              eks.amazonaws.com/role-arn: "arn:aws:iam::090885120487:role/housing-mlops-airflow-irsa"
+        workers:
+          serviceAccount:
+            create: false
+            name: airflow
+        triggerer:
+          serviceAccount:
+            create: false
+            name: airflow
 
         # Biến môi trường chung cho scheduler/worker/webserver
         env:
@@ -76,6 +112,9 @@ spec:
 
         # Tài khoản đăng nhập UI (demo)
         webserver:
+          serviceAccount:
+            create: false
+            name: airflow
           defaultUser:
             enabled: true
             username: admin
