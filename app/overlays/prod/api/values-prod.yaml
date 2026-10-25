@@ -10,7 +10,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 image:
-  tag: 679a2311a1cf851cfd7725c2e556053467e267ec
+  tag: 965a68f210c4ed8cd0f797e42819e955243852fa
 # HPA (T12). Mục tiêu là ĐO được hành vi auto-scaling dưới tải, nên ngưỡng CPU đặt
 # thấp (60%) để scale xảy ra trong khung thời gian của một lần load test thay vì
 # phải đẩy tải cực lớn.
