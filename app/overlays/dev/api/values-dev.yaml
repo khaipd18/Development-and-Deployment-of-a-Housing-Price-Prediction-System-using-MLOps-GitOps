@@ -1,10 +1,27 @@
 replicaCount: 1
+
+# Giới hạn bộ nhớ: KHÔNG hạ xuống dưới 1Gi.
+#
+# Bản cũ đặt limit 256Mi — thấp hơn cả base (512Mi) — và pod KHÔNG BAO GIỜ khởi
+# động nổi: API nạp model XGBoost cùng encoder vào bộ nhớ ngay lúc start, nên bị
+# kernel giết trước khi uvicorn mở cổng 8000. Biểu hiện: log dừng ở "Waiting for
+# application startup", container exit 137 (SIGKILL), startup probe báo
+# connection refused, CrashLoopBackOff vô hạn.
+#
+# Đo trên cụm ngày 21/11/2026, pod housing-api ở prod dùng:
+#   252–296 MiB lúc rảnh · 349 MiB lúc có tải
+# nên 256Mi không đủ cho cả phần model, và 512Mi của base cũng chỉ còn rất ít
+# biên khi gọi endpoint giải thích (TreeSHAP giữ cache).
+#
+# Đặt limit bằng prod để dev không hỏng vì lý do mà prod không gặp. Request vẫn
+# để thấp nên pod vẫn nhẹ khi xếp lên node — limit không bị giữ chỗ trước.
 resources:
   limits:
-    cpu: 250m
-    memory: 256Mi
+    cpu: 500m
+    memory: 1Gi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 200m
+    memory: 256Mi
+
 image:
   tag: 965a68f210c4ed8cd0f797e42819e955243852fa
