@@ -1,5 +1,4 @@
 replicaCount: 1
-
 # Giới hạn bộ nhớ: KHÔNG hạ xuống dưới 1Gi.
 #
 # Bản cũ đặt limit 256Mi — thấp hơn cả base (512Mi) — và pod KHÔNG BAO GIỜ khởi
@@ -22,6 +21,5 @@ resources:
   requests:
     cpu: 200m
     memory: 256Mi
-
 image:
-  tag: 965a68f210c4ed8cd0f797e42819e955243852fa
+  tag: b584c5a0530d45ccf7f800ba96a0222f9eda5f3e
