@@ -6,7 +6,16 @@ metadata:
   labels:
     app: {{ .Release.Name }}
 spec:
+  {{- /*
+  Có HPA thì KHÔNG render replicas. Để cả hai thì HPA giãn Rollout lên 6–8, Argo CD
+  thấy lệch với Git và selfHeal ép về replicaCount — đo ngày 25/11/2026 dưới k6:
+  HPA scale lên 6 bảy lần, lên 8 ba lần, pod mới bị giết ngay lúc đang khởi động.
+  Số replica chỉ được có MỘT chủ: có HPA thì là HPA (minReplicas lo phần tối thiểu).
+  */}}
+  {{- $hpa := .Values.autoscaling | default dict }}
+  {{- if not $hpa.enabled }}
   replicas: {{ .Values.replicaCount | default 1 }}
+  {{- end }}
   selector:
     matchLabels:
       app: {{ .Release.Name }}
