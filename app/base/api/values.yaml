@@ -26,6 +26,12 @@ service:
   type: ClusterIP
   port: 8000
   targetPort: 8000
+  annotations:
+    # Ingress không khai báo healthcheck-path nên ALB mặc định gọi "/". API không có
+    # route "/" (trả 404), tức target group của API luôn unhealthy và ALB chỉ còn
+    # chạy nhờ cơ chế fail-open (mọi target hỏng thì gửi cho tất cả). Health check
+    # của ALB khi đó vô nghĩa: không loại được pod nào hỏng thật.
+    alb.ingress.kubernetes.io/healthcheck-path: /health
 
 env:
   PORT: "8000"
@@ -65,20 +71,33 @@ probes:
       port: 8000
     periodSeconds: 3
     failureThreshold: 30
+  # Readiness hỏi "pod này phục vụ được chưa" nên phải gọi /health: /docs chỉ chứng
+  # minh FastAPI đã lên. Đo thật với image thiếu model: /docs trả 200 (pod sẽ Ready
+  # và nhận traffic), còn mọi /predict trả 503; /health trả 503 đúng như cần.
+  #
+  # Liveness và startup GIỮ /docs: chúng hỏi "tiến trình còn sống không". Đặt liveness
+  # vào /health thì image thiếu model sẽ bị giết rồi khởi động lại mãi — restart không
+  # sửa được image hỏng, chỉ biến một pod NotReady dễ điều tra thành CrashLoopBackOff.
+  #
+  # timeoutSeconds 3 (mặc định 1): khi một pod bị dồn tới bão hoà, đo cục bộ cả /docs
+  # lẫn /health đều p95 ~1,7–1,9 s. Với 1 s, liveness có thể giết pod đúng lúc tải đỉnh.
+  # Cần /health là async (repo app, PR #73) thì con số này mới đúng cho /health.
   readiness:
     httpGet:
-      path: /docs
+      path: /health
       port: 8000
     initialDelaySeconds: 10
     periodSeconds: 10
+    timeoutSeconds: 3
     successThreshold: 1
     failureThreshold: 3
-  
+
   liveness:
     httpGet:
       path: /docs
       port: 8000
     initialDelaySeconds: 15
     periodSeconds: 20
+    timeoutSeconds: 3
     successThreshold: 1
     failureThreshold: 3
