@@ -5,6 +5,12 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     app: {{ .Release.Name }}
+  {{- with .Values.service.annotations }}
+  # Annotation trên Service được AWS Load Balancer Controller đọc riêng cho từng
+  # backend của Ingress — dùng để mỗi target group có health check của chính nó.
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
