@@ -144,7 +144,11 @@ spec:
           service:
             type: ClusterIP
 
-        # Ingress qua ALB (TLS self-signed; bootstrap patch certificate-arn)
+        # Ingress qua ALB, TLS bằng cert self-signed trong ACM (output Terraform
+        # ingress_acm_certificate_arn). ARN ghi thẳng vào Git: cert nằm ngoài phạm vi
+        # destroy nên ARN không đổi giữa các lần dựng cụm. Từng để placeholder cho
+        # bootstrap patch, nhưng selfHeal ghi đè placeholder trở lại -> listener
+        # HTTPS không tạo được (CreateListener lỗi) và Airflow không vào được.
         ingress:
           web:
             enabled: true
@@ -154,7 +158,7 @@ spec:
               alb.ingress.kubernetes.io/target-type: ip
               alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
               alb.ingress.kubernetes.io/ssl-redirect: '443'
-              alb.ingress.kubernetes.io/certificate-arn: "REPLACE_WITH_ACM_ARN"
+              alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-southeast-1:090885120487:certificate/62b47cac-ad25-4b1a-a40b-265b08f94b8d"
               alb.ingress.kubernetes.io/healthcheck-path: /health
             path: /
             pathType: Prefix
