@@ -2,7 +2,7 @@
 #   - backend store: RDS Postgres (secret mlflow-backend/uri — tạo lúc bootstrap)
 #   - artifact store: S3 kltn-hcm-mlops-artifacts/mlflow (quyền qua IRSA)
 #   - ảnh burakince/mlflow đã kèm psycopg2 + boto3
-# ServiceAccount mlflow được gắn IRSA role qua annotation (bootstrap patch ARN thật).
+# ServiceAccount mlflow được gắn IRSA role qua annotation (ARN cố định, ghi thẳng).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -91,8 +91,10 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
-    # bootstrap patch ARN cert self-signed (output ingress_acm_certificate_arn)
-    alb.ingress.kubernetes.io/certificate-arn: "REPLACE_WITH_ACM_ARN"
+    # Cert self-signed trong ACM (output Terraform ingress_acm_certificate_arn). Ghi
+    # thẳng ARN vì cert không bị destroy; để placeholder thì selfHeal ghi đè bản
+    # bootstrap patch và listener HTTPS không tạo được.
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-southeast-1:090885120487:certificate/62b47cac-ad25-4b1a-a40b-265b08f94b8d"
     alb.ingress.kubernetes.io/healthcheck-path: /health
 spec:
   rules:
